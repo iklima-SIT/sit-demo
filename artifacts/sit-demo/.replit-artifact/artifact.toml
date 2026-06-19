@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "SIT – AI Travel Concierge Demo"
+version = "1.0.0"
+id = "artifacts/sit-demo"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20449
+
+[services.development]
+run = "pnpm --filter @workspace/sit-demo run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/sit-demo", "run", "build" ]
+publicDir = "artifacts/sit-demo/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20449"
+BASE_PATH = "/"
