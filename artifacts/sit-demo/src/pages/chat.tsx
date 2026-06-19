@@ -1,8 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send } from "lucide-react";
+import { Send, Upload, Database, X } from "lucide-react";
 import { useLocation } from "wouter";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ChangeEvent } from "react";
+import {
+  type KBCard,
+  EMBEDDED_KB,
+  searchKB,
+  extractKBInsight,
+  parseXlsxToCards,
+} from "@/lib/knowledge-base";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +128,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
 
   c.exchangeCount++;
 
-  // 1. Purpose still unknown
   if (!c.purpose) {
     return {
       message: "I'm not quite reading where you're at yet. What's pulling you to Koh Phangan — wellness, work, music, nature, or something else?",
@@ -130,7 +136,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     };
   }
 
-  // 2. Purpose follow-up (once)
   if (!c.purposeFollowUpAsked) {
     c.purposeFollowUpAsked = true;
     const a = ack(c.purpose);
@@ -171,7 +176,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     return { ...fu, updatedContext: c };
   }
 
-  // 3. Duration
   if (!c.duration && !c.durationAsked) {
     c.durationAsked = true;
     return {
@@ -181,7 +185,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     };
   }
 
-  // 4. Scooter
   if (!c.scooter && !c.scooterAsked) {
     c.scooterAsked = true;
     return {
@@ -191,7 +194,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     };
   }
 
-  // 5. Sociability
   if (!c.sociability && !c.sociabilityAsked) {
     c.sociabilityAsked = true;
     return {
@@ -201,7 +203,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     };
   }
 
-  // 6. Generate brief when we have enough context
   const hasEnough = c.purpose && c.exchangeCount >= 4;
   if (hasEnough && !c.briefGenerated) {
     c.briefGenerated = true;
@@ -212,7 +213,6 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     };
   }
 
-  // 7. Post-brief open conversation
   const ongoing = [
     "What else is on your mind about the trip?",
     "That's a fair question. What's driving it for you?",
@@ -252,6 +252,7 @@ function buildBrief(ctx: UserContext): SITBrief {
   }
   if (ctx.purpose === "music") {
     avoid.push("Planning your whole trip around Full Moon — it's a party, not a music festival, and most serious music happens on other nights");
+    avoid.push("Judging the island's music scene by Haad Rin alone — that's the smallest slice of what's here");
   }
   if (ctx.purpose === "remote-work") {
     avoid.push("Expecting full productivity from day one — the first two weeks here are almost always an adjustment period");
@@ -289,7 +290,7 @@ function buildBrief(ctx: UserContext): SITBrief {
     ],
     music: [
       "A sunset gathering at Secret Mountain or similar — this is where the real music scene lives",
-      "At least one Ecstatic Dance (note: no alcohol, no phones — a completely different energy from a party)",
+      "At least one Ecstatic Dance — no alcohol, no phones, a completely different energy from a party",
       "One quiet evening at a beach bar to balance the intensity",
       "Follow the artists, not the venues — the best nights are announced last minute",
     ],
@@ -348,6 +349,20 @@ function buildBrief(ctx: UserContext): SITBrief {
   return { lookingFor, avoid, stayArea, experiences, localInsight };
 }
 
+// ─── KB enrichment: append insight to a message if non-redundant ─────────────
+
+function enrichWithKB(baseMessage: string, kbCards: KBCard[]): string {
+  const insight = extractKBInsight(kbCards);
+  if (!insight || insight.length < 20) return baseMessage;
+  // Avoid appending if the insight is already largely covered in the base message
+  const overlap = insight
+    .toLowerCase()
+    .split(" ")
+    .filter(w => w.length > 4 && baseMessage.toLowerCase().includes(w));
+  if (overlap.length > 5) return baseMessage;
+  return `${baseMessage}\n\n${insight}`;
+}
+
 // ─── Brief Card ───────────────────────────────────────────────────────────────
 
 function BriefCard({ brief }: { brief: SITBrief }) {
@@ -357,15 +372,12 @@ function BriefCard({ brief }: { brief: SITBrief }) {
         <div className="w-1 h-4 rounded-full bg-primary flex-none" />
         <span className="text-[11px] font-bold tracking-widest uppercase text-primary/80">Your SIT Brief</span>
       </div>
-
       <div className="px-4 py-4 flex flex-col gap-4 text-[13.5px] leading-relaxed">
         <section>
           <h3 className="text-[10px] tracking-widest uppercase text-white/35 font-bold mb-1.5">What I think you're looking for</h3>
           <p className="text-white/80">{brief.lookingFor}</p>
         </section>
-
         <div className="w-full h-px bg-white/5" />
-
         <section>
           <h3 className="text-[10px] tracking-widest uppercase text-white/35 font-bold mb-1.5">What I'd avoid</h3>
           <ul className="flex flex-col gap-1.5">
@@ -377,16 +389,12 @@ function BriefCard({ brief }: { brief: SITBrief }) {
             ))}
           </ul>
         </section>
-
         <div className="w-full h-px bg-white/5" />
-
         <section>
           <h3 className="text-[10px] tracking-widest uppercase text-white/35 font-bold mb-1.5">Where I'd suggest staying</h3>
           <p className="text-white/80">{brief.stayArea}</p>
         </section>
-
         <div className="w-full h-px bg-white/5" />
-
         <section>
           <h3 className="text-[10px] tracking-widest uppercase text-white/35 font-bold mb-1.5">Experiences I'd prioritize</h3>
           <ul className="flex flex-col gap-1.5">
@@ -398,9 +406,7 @@ function BriefCard({ brief }: { brief: SITBrief }) {
             ))}
           </ul>
         </section>
-
         <div className="w-full h-px bg-white/5" />
-
         <section>
           <h3 className="text-[10px] tracking-widest uppercase text-white/35 font-bold mb-1.5">One local insight</h3>
           <p className="text-white/75 italic">{brief.localInsight}</p>
@@ -430,8 +436,15 @@ export default function ChatScreen() {
   const [showPlans, setShowPlans] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [locked, setLocked] = useState(true);
+
+  // Knowledge base
+  const [knowledgeBase, setKnowledgeBase] = useState<KBCard[]>(EMBEDDED_KB);
+  const [kbStatus, setKbStatus] = useState<"embedded" | "uploaded" | "loading">("embedded");
+  const [kbBannerVisible, setKbBannerVisible] = useState(false);
+
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -465,6 +478,29 @@ export default function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ─── File upload handler ────────────────────────────────────────────────────
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    setKbStatus("loading");
+    try {
+      const cards = await parseXlsxToCards(file);
+      if (cards.length === 0) throw new Error("No cards found");
+      setKnowledgeBase(cards);
+      setKbStatus("uploaded");
+      setKbBannerVisible(true);
+      setTimeout(() => setKbBannerVisible(false), 4000);
+    } catch {
+      setKbStatus("embedded");
+      setKbBannerVisible(false);
+    }
+  };
+
+  // ─── Send handler ───────────────────────────────────────────────────────────
+
   const handleSend = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || locked) return;
@@ -475,12 +511,15 @@ export default function ChatScreen() {
 
     addMsg({ type: "text", sender: "user", text: trimmed });
 
+    // Search KB with user message + current context
+    const kbHits = searchKB(trimmed, context.purpose, knowledgeBase, 3);
+
+    // Generate base response
     const response = processMessage(trimmed, context);
     setContext(response.updatedContext);
 
     if (response.briefReady) {
       await sitSay(response.message, 1400);
-      // Build and show brief
       setIsTyping(true);
       await new Promise(r => setTimeout(r, 2200));
       setIsTyping(false);
@@ -489,7 +528,12 @@ export default function ChatScreen() {
       setShowPlans(true);
       setLocked(false);
     } else {
-      await sitSay(response.message, 1100);
+      // Optionally enrich the response with KB insight
+      const enriched = kbHits.length > 0
+        ? enrichWithKB(response.message, kbHits)
+        : response.message;
+
+      await sitSay(enriched, 1100);
       if (response.suggestions?.length) setSuggestions(response.suggestions);
       setLocked(false);
       inputRef.current?.focus();
@@ -503,15 +547,21 @@ export default function ChatScreen() {
     }
   };
 
+  const kbCardCount = knowledgeBase.length;
+
   return (
     <div className="min-h-[100dvh] w-full flex justify-center bg-[hsl(240,12%,3%)] relative overflow-hidden">
-      {/* Ambient glow */}
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_80%_40%_at_50%_0%,hsl(250_80%_60%_/_0.07),transparent)]" />
 
-      <div className="w-full max-w-[430px] h-[100dvh] flex flex-col relative z-10 border-x border-white/[0.04] shadow-2xl" style={{ background: "hsl(240 10% 4% / 0.7)", backdropFilter: "blur(24px)" }}>
-
+      <div
+        className="w-full max-w-[430px] h-[100dvh] flex flex-col relative z-10 border-x border-white/[0.04] shadow-2xl"
+        style={{ background: "hsl(240 10% 4% / 0.7)", backdropFilter: "blur(24px)" }}
+      >
         {/* Header */}
-        <header className="flex-none px-5 py-4 flex items-center justify-between border-b border-white/[0.06]" style={{ background: "hsl(240 10% 4% / 0.85)", backdropFilter: "blur(16px)" }}>
+        <header
+          className="flex-none px-5 py-3.5 flex items-center justify-between border-b border-white/[0.06]"
+          style={{ background: "hsl(240 10% 4% / 0.85)", backdropFilter: "blur(16px)" }}
+        >
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center flex-none">
               <span className="text-primary font-bold text-sm leading-none">S</span>
@@ -524,8 +574,74 @@ export default function ChatScreen() {
               </div>
             </div>
           </div>
-          <span className="text-[10px] text-white/25 tracking-widest font-semibold uppercase">Don't Just SIT.</span>
+
+          <div className="flex items-center gap-2">
+            {/* KB indicator */}
+            <button
+              data-testid="button-kb-status"
+              onClick={() => fileInputRef.current?.click()}
+              title={`Knowledge base: ${kbCardCount} cards${kbStatus === "uploaded" ? " (custom)" : " (embedded)"} — click to upload`}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-white/[0.08] hover:border-primary/30 hover:bg-primary/10 transition-all group"
+            >
+              <Database className="w-3 h-3 text-white/30 group-hover:text-primary/60 transition-colors" />
+              <span className="text-[10px] text-white/25 group-hover:text-white/50 font-medium transition-colors">
+                {kbStatus === "loading" ? "..." : `${kbCardCount}`}
+              </span>
+              {kbStatus === "uploaded" && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-none" />
+              )}
+            </button>
+
+            <span className="text-[10px] text-white/20 tracking-widest font-semibold uppercase hidden sm:block">Don't Just SIT.</span>
+
+            {/* Upload button */}
+            <button
+              data-testid="button-upload-kb"
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload knowledge base (.xlsx)"
+              className="w-8 h-8 rounded-full flex items-center justify-center border border-white/[0.08] hover:border-primary/30 hover:bg-primary/10 transition-all"
+            >
+              <Upload className="w-3.5 h-3.5 text-white/30 hover:text-primary/60" />
+            </button>
+          </div>
         </header>
+
+        {/* KB upload banner */}
+        <AnimatePresence>
+          {kbBannerVisible && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="px-5 py-2.5 flex items-center justify-between bg-emerald-500/10 border-b border-emerald-500/20">
+                <div className="flex items-center gap-2">
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-[12px] text-emerald-300 font-medium">
+                    Knowledge base updated — {kbCardCount} cards loaded
+                  </span>
+                </div>
+                <button
+                  onClick={() => setKbBannerVisible(false)}
+                  className="text-white/30 hover:text-white/60 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          data-testid="input-file-upload"
+          onChange={handleFileChange}
+        />
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-3 scroll-smooth">
@@ -553,7 +669,7 @@ export default function ChatScreen() {
                   className={`max-w-[82%] ${msg.sender === "sit" ? "self-start" : "self-end"}`}
                 >
                   <div
-                    className={`px-4 py-3 rounded-2xl text-[14.5px] leading-relaxed ${
+                    className={`px-4 py-3 rounded-2xl text-[14.5px] leading-relaxed whitespace-pre-line ${
                       msg.sender === "sit"
                         ? "bg-primary/[0.13] text-white border border-primary/[0.18] rounded-tl-sm"
                         : "text-white border border-white/[0.08] rounded-tr-sm"
@@ -588,7 +704,7 @@ export default function ChatScreen() {
             )}
           </AnimatePresence>
 
-          {/* Plan buttons — appear in chat flow after brief */}
+          {/* Plan buttons */}
           {showPlans && (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
@@ -615,7 +731,10 @@ export default function ChatScreen() {
         </div>
 
         {/* Input area */}
-        <div className="flex-none border-t border-white/[0.06]" style={{ background: "hsl(240 10% 4% / 0.9)", backdropFilter: "blur(16px)" }}>
+        <div
+          className="flex-none border-t border-white/[0.06]"
+          style={{ background: "hsl(240 10% 4% / 0.9)", backdropFilter: "blur(16px)" }}
+        >
           {/* Suggestion chips */}
           <AnimatePresence>
             {suggestions.length > 0 && (
@@ -667,7 +786,10 @@ export default function ChatScreen() {
               disabled={!inputValue.trim() || locked}
               data-testid="button-send"
               className="w-11 h-11 rounded-full flex items-center justify-center flex-none transition-all active:scale-90 disabled:opacity-25"
-              style={{ background: "hsl(250 80% 60%)", boxShadow: inputValue.trim() && !locked ? "0 0 20px hsl(250 80% 60% / 0.35)" : "none" }}
+              style={{
+                background: "hsl(250 80% 60%)",
+                boxShadow: inputValue.trim() && !locked ? "0 0 20px hsl(250 80% 60% / 0.35)" : "none",
+              }}
             >
               <Send className="w-4 h-4 text-white" />
             </button>
