@@ -108,22 +108,32 @@ function scoreCard(card: KBCard, tokens: string[], purpose?: string): number {
   return score;
 }
 
-// ─── Public search function ───────────────────────────────────────────────────
+// ─── Public search functions ──────────────────────────────────────────────────
 
+/** Returns top-N cards as plain array (backward-compatible). */
 export function searchKB(
   query: string,
   purpose: string | undefined,
   kb: KBCard[],
   topN = 3
 ): KBCard[] {
+  return searchKBWithScore(query, purpose, kb, topN).map(s => s.card);
+}
+
+/** Returns top-N cards with their relevance scores included.
+ *  Use this when you need to apply a minimum-score gate before showing content. */
+export function searchKBWithScore(
+  query: string,
+  purpose: string | undefined,
+  kb: KBCard[],
+  topN = 5
+): { card: KBCard; score: number }[] {
   const tokens = tokenize(query);
-  const scored = kb
+  return kb
     .map(card => ({ card, score: scoreCard(card, tokens, purpose) }))
-    .filter(s => s.score > 1)
+    .filter(s => s.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, topN)
-    .map(s => s.card);
-  return scored;
+    .slice(0, topN);
 }
 
 // ─── Format KB insights for injection into a SIT response ────────────────────

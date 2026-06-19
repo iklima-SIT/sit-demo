@@ -6,8 +6,7 @@ import type { KeyboardEvent, ChangeEvent } from "react";
 import {
   type KBCard,
   EMBEDDED_KB,
-  searchKB,
-  extractKBInsight,
+  searchKBWithScore,
   parseXlsxToCards,
 } from "@/lib/knowledge-base";
 
@@ -349,18 +348,90 @@ function buildBrief(ctx: UserContext): SITBrief {
   return { lookingFor, avoid, stayArea, experiences, localInsight };
 }
 
-// ─── KB enrichment: append insight to a message if non-redundant ─────────────
+// ─── Mode detection ───────────────────────────────────────────────────────────
+//
+// DISCOVERY MODE — SIT is gathering context (purpose, duration, scooter, sociability).
+//   KB cards are NEVER injected here. The conversation is focused and intentional.
+//
+// LOCAL EXPERT MODE — user has asked a direct question (or brief is generated).
+//   KB cards are used ONLY when the relevance score clears the minimum threshold.
+//   If no card clears the bar, SIT gives an honest answer and redirects.
 
-function enrichWithKB(baseMessage: string, kbCards: KBCard[]): string {
-  const insight = extractKBInsight(kbCards);
-  if (!insight || insight.length < 20) return baseMessage;
-  // Avoid appending if the insight is already largely covered in the base message
-  const overlap = insight
-    .toLowerCase()
-    .split(" ")
-    .filter(w => w.length > 4 && baseMessage.toLowerCase().includes(w));
-  if (overlap.length > 5) return baseMessage;
-  return `${baseMessage}\n\n${insight}`;
+/** Minimum relevance score a KB card must hit to appear in an expert response. */
+const EXPERT_SCORE_MIN = 5;
+
+/** Returns true if the message looks like a direct question the user expects answered. */
+function isDirectQuestion(text: string): boolean {
+  if (text.includes("?")) return true;
+  return /^(what|where|when|how|who|which|is there|are there|can i|do you|is it|tell me about|recommend|suggest|any |does |will |should |could |find me|show me)/i.test(text.trim());
+}
+
+/**
+ * Tries to build a direct, KB-backed answer to the user's question.
+ * Returns null if no card clears the relevance threshold — caller should
+ * fall through to buildHonestFallback() in that case.
+ */
+function buildExpertAnswer(
+  question: string,
+  hits: { card: KBCard; score: number }[]
+): string | null {
+  const q = question.toLowerCase();
+  const strong = hits.filter(h => h.score >= EXPERT_SCORE_MIN);
+
+  // ── Real-time questions we genuinely can't answer ─────────────────────────
+  if (/tonight|today|this week|what.?s on|happening now|event|schedule|lineup|right now/.test(q)) {
+    const eventCard = strong.find(h =>
+      /music|party|event|dance|dj|techno|house/.test(h.card.category.toLowerCase())
+    );
+    if (eventCard) {
+      const insight = eventCard.card.localInsight || eventCard.card.description;
+      if (insight && insight.length > 20) {
+        return `I don't have a live event feed, so I can't tell you what's on tonight specifically.\n\n${insight}\n\nWhat kind of vibe are you after — house music, techno, live bands, ecstatic dance, or a social sunset gathering?`;
+      }
+    }
+    return null; // fall through to honest fallback
+  }
+
+  if (strong.length === 0) return null;
+
+  // ── Prefer the card whose content directly matches the question ────────────
+  // Priority: localInsight > description > aiRule (aiRule is a meta-instruction, not response text)
+  const top = strong[0].card;
+  const answer = top.localInsight || top.description;
+  if (!answer || answer.length < 20) return null;
+
+  // If there's an insider tip on top of the main answer, append it
+  const bonus = top.localSecret && top.localSecret.length > 20 ? `\n\n${top.localSecret}` : "";
+
+  return answer + bonus;
+}
+
+/**
+ * Honest fallback when we don't have a KB answer for the user's question.
+ * Admits the limitation and redirects to something SIT can help with.
+ */
+function buildHonestFallback(question: string): string {
+  const q = question.toLowerCase();
+
+  if (/tonight|today|what.?s on|happening|event|schedule|lineup/.test(q)) {
+    return "I don't have a live event feed.\n\nIf you tell me what you're after — house music, techno, live bands, ecstatic dance, or a social sunset gathering — I'll point you toward the type of venue locals actually check.";
+  }
+  if (/cost|price|how much|expensive|cheap|budget/.test(q)) {
+    return "Costs vary a lot depending on your area and lifestyle. What are you planning on — just accommodation, or the full picture including food and activities?";
+  }
+  if (/safe|dangerous|crime|scam/.test(q)) {
+    return "Koh Phangan is generally safe. The main risks are scooter accidents and petty theft at crowded Full Moon events.\n\nIs there something specific you're worried about?";
+  }
+  if (/weather|rain|season|monsoon|best time/.test(q)) {
+    return "February to August is the sweet spot — dry, sunny, and manageable. November and December can be rough with heavy rain and choppy seas.\n\nWhen are you planning to visit?";
+  }
+  if (/visa|stay|how long|legal/.test(q)) {
+    return "Most passports get 30 days on arrival, extendable once for another 30 at the immigration office in Thong Sala. Longer stays require a proper Thai visa — the details depend on your nationality.\n\nWhat's your situation?";
+  }
+  if (/sim|internet|wifi|data/.test(q)) {
+    return "AIS and DTAC both have strong coverage on the island. A monthly SIM with unlimited data runs about $15–20. Most cafés and coworking spaces have reliable wifi.\n\nAre you planning to work remotely?";
+  }
+  return "I don't have a specific answer for that. Tell me a bit more and I'll give you what I do know.";
 }
 
 // ─── Brief Card ───────────────────────────────────────────────────────────────
@@ -511,14 +582,48 @@ export default function ChatScreen() {
 
     addMsg({ type: "text", sender: "user", text: trimmed });
 
-    // Search KB with user message + current context
-    const kbHits = searchKB(trimmed, context.purpose, knowledgeBase, 3);
+    const isQuestion = isDirectQuestion(trimmed);
+    const isPostBrief = context.briefGenerated;
 
-    // Generate base response
+    // ── POST-BRIEF: LOCAL EXPERT MODE ────────────────────────────────────────
+    // Brief has been shown — user is now asking follow-up questions or exploring.
+    // Answer directly from KB when relevant. Never inject unrelated cards.
+    if (isPostBrief) {
+      if (isQuestion) {
+        const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
+        const expertAnswer = buildExpertAnswer(trimmed, hits);
+        if (expertAnswer) {
+          await sitSay(expertAnswer, 1200);
+        } else {
+          await sitSay(buildHonestFallback(trimmed), 1100);
+        }
+      } else {
+        // Not a question — brief conversational acknowledgment, keep door open
+        const acks = [
+          "Good to know. Anything else you want to nail down before you arrive?",
+          "Makes sense. What else is on your radar?",
+          "Worth keeping in mind. Anything specific you want me to look into?",
+          "Fair enough. What else would be useful to know?",
+          "Noted. Is there anything about the island you're unsure about?",
+        ];
+        await sitSay(acks[context.exchangeCount % acks.length], 1000);
+        setContext(prev => ({ ...prev, exchangeCount: prev.exchangeCount + 1 }));
+      }
+      setLocked(false);
+      inputRef.current?.focus();
+      return;
+    }
+
+    // ── DISCOVERY MODE ────────────────────────────────────────────────────────
+    // SIT is gathering context (purpose, duration, scooter, sociability).
+    // Run the state machine. KB cards are NEVER injected into discovery responses —
+    // the conversation is focused on understanding the user, not demonstrating knowledge.
+
     const response = processMessage(trimmed, context);
     setContext(response.updatedContext);
 
     if (response.briefReady) {
+      // ── Brief generation ───────────────────────────────────────────────────
       await sitSay(response.message, 1400);
       setIsTyping(true);
       await new Promise(r => setTimeout(r, 2200));
@@ -527,17 +632,32 @@ export default function ChatScreen() {
       await sitSay("Would you like me to build a personalized plan for your stay?", 1300);
       setShowPlans(true);
       setLocked(false);
-    } else {
-      // Optionally enrich the response with KB insight
-      const enriched = kbHits.length > 0
-        ? enrichWithKB(response.message, kbHits)
-        : response.message;
-
-      await sitSay(enriched, 1100);
-      if (response.suggestions?.length) setSuggestions(response.suggestions);
-      setLocked(false);
-      inputRef.current?.focus();
+      return;
     }
+
+    if (isQuestion) {
+      // ── Question mid-discovery: answer first, then continue gathering context ──
+      // This is the LOCAL EXPERT MODE path triggered during discovery.
+      // Rule: answer the question → then ask the next discovery question.
+      const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
+      const expertAnswer = buildExpertAnswer(trimmed, hits);
+      if (expertAnswer) {
+        await sitSay(expertAnswer, 1200);
+      } else {
+        await sitSay(buildHonestFallback(trimmed), 1000);
+      }
+      // Continue discovery — ask the pending context question after a short pause
+      await new Promise(r => setTimeout(r, 350));
+      await sitSay(response.message, 900);
+      if (response.suggestions?.length) setSuggestions(response.suggestions);
+    } else {
+      // ── Pure discovery: show state machine response only — no KB injection ──
+      await sitSay(response.message, 1100);
+      if (response.suggestions?.length) setSuggestions(response.suggestions);
+    }
+
+    setLocked(false);
+    inputRef.current?.focus();
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
