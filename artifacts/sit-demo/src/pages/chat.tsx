@@ -129,7 +129,7 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
 
   if (!c.purpose) {
     return {
-      message: "I'm not quite reading where you're at yet. What's pulling you to Koh Phangan — wellness, work, music, nature, or something else?",
+      message: "What's bringing you to Koh Phangan?",
       suggestions: ["Wellness", "Music & parties", "Remote work", "Romance", "Community", "Nature", "Moving here", "Not sure yet"],
       updatedContext: c,
     };
@@ -140,38 +140,38 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
     const a = ack(c.purpose);
     const followUps: Record<string, { message: string; suggestions?: string[] }> = {
       wellness: {
-        message: `${a} What draws you specifically — rest, spirituality, personal growth, or something more physical?`,
-        suggestions: ["Rest & relaxation", "Spirituality", "Personal growth", "Physical health", "A mix"],
+        message: `${a} What specifically — rest, spirituality, personal growth, or something physical?`,
+        suggestions: ["Rest", "Spirituality", "Personal growth", "Physical health", "A mix"],
       },
       music: {
-        message: `${a} Are you chasing great music, the social energy, or the all-night experience?`,
+        message: `${a} Music, social energy, or the all-night experience?`,
         suggestions: ["Great music", "Social energy", "All-night parties", "All of it"],
       },
       "remote-work": {
-        message: `${a} Are you already productive working remotely, or are you hoping the island helps you find a better rhythm?`,
-        suggestions: ["Already productive", "Looking for a better routine", "Bit of both"],
+        message: `${a} Already productive remotely, or looking for a better rhythm?`,
+        suggestions: ["Already productive", "Need a better routine", "Bit of both"],
       },
       romance: {
-        message: `${a} Are you traveling with a partner, or coming solo with that in mind?`,
-        suggestions: ["With a partner", "Solo, open to it"],
+        message: `${a} Traveling with a partner, or solo?`,
+        suggestions: ["With a partner", "Solo"],
       },
       community: {
-        message: `${a} What kind of community matters to you — creative, spiritual, wellness-focused, entrepreneurial, or just genuine human connection?`,
+        message: `${a} What type — creative, spiritual, wellness, or just genuine connection?`,
         suggestions: ["Creative", "Spiritual", "Wellness", "Entrepreneurial", "Human connection"],
       },
       nature: {
-        message: `${a} What's your speed — active (hiking, swimming), or more contemplative (sunsets, quiet beaches)?`,
-        suggestions: ["Active — hiking & swimming", "Contemplative — sunsets & quiet", "Both"],
+        message: `${a} Active (hiking, swimming) or contemplative (sunsets, quiet beaches)?`,
+        suggestions: ["Active", "Contemplative", "Both"],
       },
       moving: {
-        message: `${a} What do you hope will actually be different in your life if you make the move?`,
+        message: `${a} What needs to be different in your life if you make the move?`,
       },
       unsure: {
-        message: `${a} Are you more in need of genuine rest, or are you hoping something will happen here?`,
-        suggestions: ["Genuine rest", "Looking for something to happen", "Somewhere between the two"],
+        message: `${a} Need genuine rest, or hoping something will happen here?`,
+        suggestions: ["Genuine rest", "Looking for something", "Somewhere between"],
       },
     };
-    const fu = followUps[c.purpose] ?? { message: "Tell me more about what you're hoping for." };
+    const fu = followUps[c.purpose] ?? { message: "Tell me more." };
     return { ...fu, updatedContext: c };
   }
 
@@ -554,9 +554,9 @@ export default function ChatScreen() {
   // Boot sequence
   useEffect(() => {
     const boot = async () => {
-      await sitSay("Hey. I'm SIT — a local intelligence concierge for Koh Phangan.", 900);
-      await sitSay("Before I recommend anything, I need to understand you first.", 700);
-      await sitSay("Why are you coming to Koh Phangan?", 900);
+      await sitSay("Hey. I'm SIT — local intelligence for Koh Phangan.", 900);
+      await sitSay("Before I recommend anything, I need to understand you.", 700);
+      await sitSay("What's bringing you to the island?", 900);
       setSuggestions(["Wellness", "Music & parties", "Remote work", "Romance", "Community", "Nature", "Moving here", "Not sure yet"]);
       setLocked(false);
       inputRef.current?.focus();
