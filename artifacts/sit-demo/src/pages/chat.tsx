@@ -229,121 +229,121 @@ function processMessage(userMessage: string, ctx: UserContext): SITResponse {
 
 function buildBrief(ctx: UserContext): SITBrief {
   const lookingForMap: Record<string, string> = {
-    wellness: "You're looking for a genuine reset — not just a spa break, but something that actually shifts how you feel. Koh Phangan has the infrastructure for that, but the quality gap between good and bad is wide. The right experience here can be transformative.",
-    music: "You want to be somewhere that feels alive — good music, interesting people, and a scene that goes beyond the obvious. Koh Phangan has that, but you have to know where to look past the Full Moon narrative.",
-    "remote-work": "You're looking for a base that works — reliable internet, an environment that doesn't drain you, and enough stimulation to stay motivated. The challenge isn't finding those things here; it's managing the pull of everything else the island offers.",
-    romance: "You're looking for an environment that naturally creates the conditions for connection — beautiful, unhurried, and soft enough to let something real happen. Koh Phangan can do that, if you stay in the right area.",
-    community: "You're looking to belong to something while you're here — not just meet people, but actually feel like you're part of a scene. That's more achievable on Koh Phangan than most places, because the community is unusually porous.",
-    nature: "You want the island that's actually there, not the filtered version. Real beaches, real jungle, and the kind of quiet you can't find in a resort. That Koh Phangan absolutely exists — it's just not on the main road.",
-    moving: "You're not just visiting — you're evaluating. You want to know if this is a place you could actually build a life. That's a different question from whether you enjoy a holiday, and it requires a different kind of investigation.",
-    unsure: "You're open, which is actually the best way to arrive. You're looking for something — you're just not sure what it is yet. Koh Phangan tends to show you quickly. The people who thrive here are usually the ones who don't have a rigid plan.",
+    wellness:      "A genuine reset — not a spa break. The quality gap here is extreme, so where you go matters.",
+    music:         "Somewhere that feels alive beyond Full Moon. The real scene exists — you just have to know where to look.",
+    "remote-work": "A base that actually works. The infrastructure is there; managing the island's pull on your focus is the challenge.",
+    romance:       "Beautiful, unhurried, off the main drag. Koh Phangan delivers — in the right area.",
+    community:     "To actually belong somewhere, not just pass through. More achievable here than most places.",
+    nature:        "The real island, not the filtered version. Quiet beaches, actual jungle — it exists.",
+    moving:        "To evaluate, not just visit. That's a different question and needs a different approach.",
+    unsure:        "You're open. That's the best way to arrive — the island tends to show you quickly.",
   };
 
-  const lookingFor = lookingForMap[ctx.purpose ?? "unsure"] ?? lookingForMap.unsure;
+  const lookingFor = lookingForMap[ctx.purpose ?? "unsure"] ?? lookingForMap.unsure!;
 
   const avoid: string[] = [];
   if (ctx.scooter === "no" || ctx.scooter === "prefer-not") {
-    avoid.push("Accommodation in remote areas — without a scooter, transport costs become a daily friction that compounds fast");
+    avoid.push("Remote accommodation — transport costs compound fast without a scooter");
   }
   if (ctx.purpose === "wellness") {
-    avoid.push("Booking ceremonies or retreats without researching the facilitator — the quality range here is extreme");
-    avoid.push("Wellness packages marketed heavily online — the best teachers rarely need to advertise hard");
+    avoid.push("Unresearched ceremonies or retreats — quality range is extreme");
+    avoid.push("Heavily marketed wellness packages — good teachers don't need to advertise hard");
   }
   if (ctx.purpose === "music") {
-    avoid.push("Planning your whole trip around Full Moon — it's a party, not a music festival, and most serious music happens on other nights");
-    avoid.push("Judging the island's music scene by Haad Rin alone — that's the smallest slice of what's here");
+    avoid.push("Planning everything around Full Moon — it's a party, not a music festival");
+    avoid.push("Judging the scene by Haad Rin — that's the smallest slice");
   }
   if (ctx.purpose === "remote-work") {
-    avoid.push("Expecting full productivity from day one — the first two weeks here are almost always an adjustment period");
+    avoid.push("Expecting full productivity in week one — adjustment period is real");
   }
   if (ctx.sociability === "alone") {
-    avoid.push("Party areas if you value peace — Haad Rin doesn't sleep");
+    avoid.push("Haad Rin — it doesn't sleep");
   }
   if (avoid.length === 0) {
-    avoid.push("Tourist traps around Haad Rin during peak season — quality drops and prices don't");
-    avoid.push("Rushing to cover the whole island — depth beats coverage here");
+    avoid.push("Haad Rin tourist traps — quality drops, prices don't");
+    avoid.push("Trying to cover the whole island — depth beats coverage");
   }
 
   let stayArea: string;
   if (ctx.scooter === "no" || ctx.scooter === "prefer-not") {
-    stayArea = "Srithanu or Thong Sala — both walkable, both coastal, both have everything you need within reach. Don't let anyone convince you to book remotely without a scooter.";
+    stayArea = "Srithanu or Thong Sala — walkable, coastal, everything within reach. Don't book remotely without a scooter.";
   } else {
     const areaMap: Record<string, string> = {
-      wellness: "Srithanu — the island's wellness hub. Most of what you're after is within five minutes of each other, with good cafés and a quieter, intentional energy.",
-      music: "Baan Tai or Haad Rin — depending on how deep into the scene you want to go. Baan Tai puts you near the jungle venues; Haad Rin is closer to the classic energy.",
-      romance: "Hinkong — quieter, more intimate, and the sunsets are genuinely world-class. Worth the extra few minutes from town.",
-      "remote-work": "Srithanu or Thong Sala — both have reliable wifi, coworking options, and enough café culture to keep you functional on long work days.",
-      community: "Srithanu — that's where the recurring events, yoga classes, and social circles concentrate. Proximity to the action matters here.",
-      nature: "North coast — Ban Tai, Chaloklum, or the hills above Srithanu. You'll wake up in it rather than drive to it.",
-      moving: "Don't commit to one area on arrival. Spend time in Srithanu, Thong Sala, and the north coast before deciding where you'd actually live.",
+      wellness:      "Srithanu — the wellness hub. Everything within 5 minutes, quieter energy.",
+      music:         "Baan Tai (jungle venues) or Haad Rin (classic scene) — depends how deep you want to go.",
+      romance:       "Hinkong — quiet, intimate, world-class sunsets.",
+      "remote-work": "Srithanu or Thong Sala — reliable wifi, coworking, good cafés.",
+      community:     "Srithanu — recurring events and social circles concentrate here.",
+      nature:        "North coast — Chaloklum or the hills above Srithanu. Wake up in it.",
+      moving:        "Don't commit on arrival. Try three areas before deciding.",
     };
-    stayArea = areaMap[ctx.purpose ?? ""] ?? "Srithanu — versatile, beautiful, and a strong base for most intentions. Easy to expand from once you have your bearings.";
+    stayArea = areaMap[ctx.purpose ?? ""] ?? "Srithanu — versatile base, easy to expand from.";
   }
 
   const experienceMap: Record<string, string[]> = {
     wellness: [
-      "One week at a reputable yoga school — consistency matters more than intensity",
-      "A cacao or sound healing session with a vetted facilitator",
-      "Daily morning swim at a quiet beach before the heat sets in",
-      "At least three days with no agenda — let the island suggest things",
+      "One week at a reputable yoga school — consistency beats intensity",
+      "Cacao or sound healing with a vetted facilitator",
+      "Daily morning swim before the heat hits",
+      "3 days with zero agenda",
     ],
     music: [
-      "A sunset gathering at Secret Mountain or similar — this is where the real music scene lives",
-      "At least one Ecstatic Dance — no alcohol, no phones, a completely different energy from a party",
-      "One quiet evening at a beach bar to balance the intensity",
-      "Follow the artists, not the venues — the best nights are announced last minute",
+      "Sunset gathering at Secret Mountain — that's where the real scene is",
+      "One Ecstatic Dance — no alcohol, no phones, completely different energy",
+      "One quiet beach bar evening to balance the intensity",
+      "Follow artists, not venues — best nights are announced last minute",
     ],
     "remote-work": [
-      "Lock down a coworking space with reliable internet in week one — don't try to work from cafés full-time",
-      "Build one recurring activity into your schedule from the start — yoga, beach sport, anything social",
-      "Take at least one full day off per week — overworking here is common and counterproductive",
-      "Attend a coworking social event — the quality of people working on this island is unusually high",
+      "Lock in coworking with reliable internet in week one",
+      "One recurring activity from day one — yoga, sport, anything social",
+      "At least one full day off per week",
+      "Attend a coworking social — the people here are unusually good",
     ],
     romance: [
-      "Sunset at Hinkong — at low tide, a sunset picnic on the flats; at high tide, SUP out at golden hour",
-      "A private longtail boat trip to a quiet beach, arrangeable for $50–80",
-      "Dinner in Thong Sala proper — one good evening in town changes the texture of the trip",
+      "Sunset at Hinkong — low tide picnic or SUP at golden hour",
+      "Private longtail to a quiet beach (~$60)",
+      "One proper dinner in Thong Sala town",
     ],
     community: [
-      "Find one recurring class and go every single time — yoga, dance, breathwork, anything",
-      "Sunset gatherings — they repeat weekly and the same faces show up",
-      "A coworking space membership even if you're not working — the social value is worth it",
-      "Women's circles or men's groups if that resonates — both are active and well-run here",
+      "One recurring class — go every single time",
+      "Weekly sunset gatherings — same faces, real connections",
+      "Coworking membership even if you're not working",
+      "Women's or men's circles if that resonates — both well-run",
     ],
     nature: [
-      "Jungle hike to the viewpoint — underrated and genuinely undercrowded",
-      "Swimming at Haad Yuan or Thong Nai Pan Noi — swimmable, beautiful, and quieter than the famous spots",
-      "Snorkel trip to Sail Rock if you dive at all — one of Southeast Asia's best sites",
-      "One night somewhere with no light pollution — the sky is remarkable",
+      "Jungle hike to the viewpoint — genuinely undercrowded",
+      "Haad Yuan or Thong Nai Pan Noi — swimmable and quiet",
+      "Sail Rock snorkel trip — one of SE Asia's best sites",
+      "One night with no light pollution",
     ],
     moving: [
-      "Spend time in three different areas before deciding where you'd live — they feel entirely different",
-      "Visit during a regular week, not Full Moon — that's not what daily life here looks like",
-      "Connect with long-term expats, not tourists — they'll give you the real picture",
-      "Try a co-living space as a testing ground before committing to a rental",
+      "3 areas minimum before deciding where to live",
+      "Visit during a normal week — not Full Moon",
+      "Talk to long-term expats, not tourists",
+      "Try co-living before committing to a rental",
     ],
     unsure: [
-      "Give yourself the first 2–3 days with no agenda at all",
-      "A sunset gathering to feel the social energy of the island",
-      "One beach that nobody told you to go to — ask a local",
-      "Eat where there are no menus in English",
+      "First 2–3 days: no agenda",
+      "One sunset gathering",
+      "One beach nobody told you about — ask a local",
+      "Eat where there's no English menu",
     ],
   };
 
-  const experiences = experienceMap[ctx.purpose ?? "unsure"] ?? experienceMap.unsure;
+  const experiences = experienceMap[ctx.purpose ?? "unsure"] ?? experienceMap.unsure!;
 
   const insightMap: Record<string, string> = {
-    wellness: "Ecstatic Dance is the most misunderstood event on the island. Most people avoid it thinking it's a party. It's not — no alcohol, no phones, complete presence required. It's one of the most disarming experiences here and worth trying once before you dismiss it.",
-    music: "Full Moon is the island's biggest marketing asset and its most overrated event. The people who know Koh Phangan's music scene properly often skip it entirely. The real nights happen on a Tuesday, with 200 people who actually care about the music.",
-    "remote-work": "Productivity usually drops for the first 2–3 weeks, then exceeds where you started. People who expect day-one output tend to leave frustrated. The ones who give it time often extend their stay by months.",
-    romance: "Hinkong at low tide has a specific kind of silence that's rare on a tourist island. The shallow water extends hundreds of metres and the light at 5pm is unlike anywhere else. It's one of those places that actually works the way travel photographs promise.",
-    community: "Community on Koh Phangan forms around recurrence, not events. Showing up once builds nothing. Showing up to the same yoga class three times a week — that's where the real connections happen. Consistency is the only strategy that works.",
-    nature: "There are beaches on the north coast that don't appear on any major travel site and rarely show up on Instagram. They're swimmable, quiet, and genuinely beautiful. If you want them, ask a local who's been here longer than a season — not a hotel concierge.",
-    moving: "The first year of moving to Koh Phangan is a honeymoon. The second is when the real picture appears. The people who make it work long-term treat it like a real base — with structure, purpose, and income — not an extended holiday.",
-    unsure: "People often arrive at Koh Phangan not knowing what they need. A surprising number leave knowing exactly who they want to become. That's not a sales pitch — it's just what happens when you slow down enough to hear yourself.",
+    wellness:      "Ecstatic Dance is the most misunderstood event here. No alcohol, no phones — nothing like what people expect.",
+    music:         "Full Moon is the island's most marketed and most overrated night. The real music happens on a Tuesday with 200 people who actually care.",
+    "remote-work": "Most people are less productive in the first two weeks. The ones who give it time often extend their stay by months.",
+    romance:       "Hinkong at low tide is one of those rare places that actually delivers what travel photos promise.",
+    community:     "Community here forms around recurrence, not events. Show up to the same class three times a week — that's the only strategy that works.",
+    nature:        "The best beaches aren't on any travel site. Ask a local who's been here longer than a season.",
+    moving:        "Year one is a honeymoon. Year two is when the real picture appears.",
+    unsure:        "A surprising number of people arrive not knowing what they need — and leave knowing exactly who they want to become.",
   };
 
-  const localInsight = insightMap[ctx.purpose ?? "unsure"] ?? insightMap.unsure;
+  const localInsight = insightMap[ctx.purpose ?? "unsure"] ?? insightMap.unsure!;
 
   return { lookingFor, avoid, stayArea, experiences, localInsight };
 }
@@ -366,10 +366,16 @@ function isDirectQuestion(text: string): boolean {
   return /^(what|where|when|how|who|which|is there|are there|can i|do you|is it|tell me about|recommend|suggest|any |does |will |should |could |find me|show me)/i.test(text.trim());
 }
 
+/** Clips raw KB prose to at most N sentences so it never becomes an essay. */
+function firstSentences(text: string, n: number): string {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+  return sentences.slice(0, n).join(" ").trim();
+}
+
 /**
  * Tries to build a direct, KB-backed answer to the user's question.
- * Returns null if no card clears the relevance threshold — caller should
- * fall through to buildHonestFallback() in that case.
+ * Format: short answer → bullet points if available → one-line local insight.
+ * Returns null if no card clears the relevance threshold.
  */
 function buildExpertAnswer(
   question: string,
@@ -383,55 +389,65 @@ function buildExpertAnswer(
     const eventCard = strong.find(h =>
       /music|party|event|dance|dj|techno|house/.test(h.card.category.toLowerCase())
     );
-    if (eventCard) {
-      const insight = eventCard.card.localInsight || eventCard.card.description;
-      if (insight && insight.length > 20) {
-        return `I don't have a live event feed, so I can't tell you what's on tonight specifically.\n\n${insight}\n\nWhat kind of vibe are you after — house music, techno, live bands, ecstatic dance, or a social sunset gathering?`;
-      }
+    const insight = eventCard ? firstSentences(eventCard.card.localInsight || eventCard.card.description, 2) : null;
+    if (insight && insight.length > 20) {
+      return `No live event feed — I can't tell you what's on tonight.\n\n${insight}\n\nLocal insight:\nThe best nights are rarely the biggest ones — follow the artists, not the venues.`;
     }
-    return null; // fall through to honest fallback
+    return null;
   }
 
   if (strong.length === 0) return null;
 
-  // ── Prefer the card whose content directly matches the question ────────────
-  // Priority: localInsight > description > aiRule (aiRule is a meta-instruction, not response text)
   const top = strong[0].card;
-  const answer = top.localInsight || top.description;
-  if (!answer || answer.length < 20) return null;
 
-  // If there's an insider tip on top of the main answer, append it
-  const bonus = top.localSecret && top.localSecret.length > 20 ? `\n\n${top.localSecret}` : "";
+  // Build bullet points from bestFor field if it has structured data
+  const bullets = top.bestFor
+    ? top.bestFor.split(/[,;]/).map(s => s.trim()).filter(s => s.length > 2).slice(0, 4)
+    : [];
 
-  return answer + bonus;
+  const mainAnswer = firstSentences(top.localInsight || top.description, 2);
+  if (!mainAnswer || mainAnswer.length < 20) return null;
+
+  const insightLine = top.localSecret
+    ? firstSentences(top.localSecret, 1)
+    : firstSentences(top.localInsight || top.description, 1);
+
+  if (bullets.length >= 2) {
+    return `${top.topic}:\n${bullets.map(b => `• ${b}`).join("\n")}\n\nLocal insight:\n${insightLine}`;
+  }
+
+  return `${mainAnswer}\n\nLocal insight:\n${insightLine}`;
 }
 
 /**
- * Honest fallback when we don't have a KB answer for the user's question.
- * Admits the limitation and redirects to something SIT can help with.
+ * Honest fallback when KB has no high-relevance answer.
+ * Short, direct, always ends with a redirect or question.
  */
 function buildHonestFallback(question: string): string {
   const q = question.toLowerCase();
 
   if (/tonight|today|what.?s on|happening|event|schedule|lineup/.test(q)) {
-    return "I don't have a live event feed.\n\nIf you tell me what you're after — house music, techno, live bands, ecstatic dance, or a social sunset gathering — I'll point you toward the type of venue locals actually check.";
+    return "No live event feed — I can't tell you what's on right now.\n\nTell me what you're after:\n• House / techno\n• Live music\n• Ecstatic dance\n• Social sunset gathering\n\nI'll point you to the right type of venue.";
   }
   if (/cost|price|how much|expensive|cheap|budget/.test(q)) {
-    return "Costs vary a lot depending on your area and lifestyle. What are you planning on — just accommodation, or the full picture including food and activities?";
+    return "Rough daily costs:\n• Budget: $30–50\n• Mid-range: $60–100\n• Comfortable: $100–150+\n\nLocal insight:\nAccommodation near the main areas is 30% cheaper if you book direct.";
   }
   if (/safe|dangerous|crime|scam/.test(q)) {
-    return "Koh Phangan is generally safe. The main risks are scooter accidents and petty theft at crowded Full Moon events.\n\nIs there something specific you're worried about?";
+    return "Generally safe. Main risks:\n• Scooter accidents\n• Petty theft at Full Moon\n• Dodgy ceremony facilitators\n\nAnything specific you're worried about?";
   }
   if (/weather|rain|season|monsoon|best time/.test(q)) {
-    return "February to August is the sweet spot — dry, sunny, and manageable. November and December can be rough with heavy rain and choppy seas.\n\nWhen are you planning to visit?";
+    return "Best months:\n• Feb – Aug: dry, sunny\n• Sep – Oct: occasional rain\n• Nov – Dec: rough — heavy rain, choppy seas\n\nWhen are you planning to come?";
   }
   if (/visa|stay|how long|legal/.test(q)) {
-    return "Most passports get 30 days on arrival, extendable once for another 30 at the immigration office in Thong Sala. Longer stays require a proper Thai visa — the details depend on your nationality.\n\nWhat's your situation?";
+    return "Visa basics:\n• 30 days on arrival (most passports)\n• +30 day extension at Thong Sala immigration\n• Longer stays need a proper Thai visa\n\nWhat's your nationality?";
   }
   if (/sim|internet|wifi|data/.test(q)) {
-    return "AIS and DTAC both have strong coverage on the island. A monthly SIM with unlimited data runs about $15–20. Most cafés and coworking spaces have reliable wifi.\n\nAre you planning to work remotely?";
+    return "Connectivity:\n• AIS or DTAC — both solid coverage\n• Monthly SIM with unlimited data: ~$15–20\n• Most coworking spaces and cafés have reliable wifi\n\nAre you planning to work remotely?";
   }
-  return "I don't have a specific answer for that. Tell me a bit more and I'll give you what I do know.";
+  if (/food|eat|restaurant|cafe|coffee/.test(q)) {
+    return "Food breakdown:\n• Street food: $2–5 per meal\n• Local restaurants: $5–10\n• Western / health cafés: $8–15\n\nLocal insight:\nThe best spots rarely have English menus out front.";
+  }
+  return "I don't have a specific answer for that. Tell me more and I'll give you what I do know.";
 }
 
 // ─── Brief Card ───────────────────────────────────────────────────────────────
@@ -521,7 +537,7 @@ export default function ChatScreen() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, showPlans]);
 
-  const addMsg = (msg: Omit<Message, "id" | "timestamp">) => {
+  const addMsg = (msg: Omit<TextMessage, "id" | "timestamp"> | Omit<BriefMessage, "id" | "timestamp">) => {
     setMessages(prev => [
       ...prev,
       { ...msg, id: Math.random().toString(36).slice(2), timestamp: new Date() } as Message,
