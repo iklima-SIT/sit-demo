@@ -481,67 +481,179 @@ function classifyIntent(text: string): QueryIntent {
 
 // ─── Location / Directions Handler ────────────────────────────────────────────
 
-/** Extract key noun from a location question to match against KB cards. */
-function extractLocationSubject(q: string): string[] {
-  // Remove question words and transport verbs to expose the destination
-  return q
-    .replace(/\b(how|can|do|i|get|to|from|where|is|it|the|a|an|reach|go|find|taxi|scooter|transport|ferry|boat|far|long|take|near|close|located)\b/gi, " ")
-    .split(/\W+/)
-    .filter(w => w.length > 2);
+// ─── Venue Database ────────────────────────────────────────────────────────────
+
+interface VenueData {
+  displayName: string;
+  area: string;
+  mapsUrl: string;
+  fromThongSala: string;
+  fromSrithanu: string;
+  insight: string;
+  walkNote?: string;
+}
+
+const VENUE_DB: Record<string, VenueData> = {
+  lighthouse: {
+    displayName: "Lighthouse",
+    area: "Haad Rin (south tip)",
+    mapsUrl: "https://maps.google.com/?q=Lighthouse+Haad+Rin+Koh+Phangan",
+    fromThongSala: "~30 min by scooter / 400–500 THB taxi",
+    fromSrithanu: "~30–35 min by scooter / 500 THB taxi",
+    insight: "Go before midnight — it fills fast on party nights.",
+    walkNote: "Final stretch from the road is a short walk down.",
+  },
+  "secret mountain": {
+    displayName: "Secret Mountain",
+    area: "Hills above Srithanu (west coast)",
+    mapsUrl: "https://maps.google.com/?q=Secret+Mountain+Bar+Koh+Phangan",
+    fromThongSala: "~15 min by scooter",
+    fromSrithanu: "5–10 min by scooter up the hill",
+    insight: "GPS is unreliable here. Follow the signs or ask locally.",
+    walkNote: "Scooter access only — steep road, not walkable.",
+  },
+  "haad rin": {
+    displayName: "Haad Rin",
+    area: "South tip of the island",
+    mapsUrl: "https://maps.google.com/?q=Haad+Rin+Koh+Phangan",
+    fromThongSala: "~30 min by scooter / songthaew 80–150 THB",
+    fromSrithanu: "~35 min by scooter",
+    insight: "Haad Rin and Srithanu feel like different islands. Decide which vibe you want before committing.",
+  },
+  srithanu: {
+    displayName: "Srithanu",
+    area: "West coast, 8 km north of Thong Sala",
+    mapsUrl: "https://maps.google.com/?q=Srithanu+Koh+Phangan",
+    fromThongSala: "~10 min by scooter / songthaew 80 THB",
+    fromSrithanu: "You're here",
+    insight: "The wellness, yoga, and coworking hub. Srithanu and Hinkong blend into each other.",
+  },
+  "hin kong": {
+    displayName: "Hin Kong (Hinkong)",
+    area: "West coast, just south of Srithanu",
+    mapsUrl: "https://maps.google.com/?q=Hinkong+Koh+Phangan",
+    fromThongSala: "~10 min by scooter",
+    fromSrithanu: "15 min walk along the beach / 5 min by scooter",
+    insight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
+  },
+  hinkong: {
+    displayName: "Hin Kong (Hinkong)",
+    area: "West coast, just south of Srithanu",
+    mapsUrl: "https://maps.google.com/?q=Hinkong+Koh+Phangan",
+    fromThongSala: "~10 min by scooter",
+    fromSrithanu: "15 min walk along the beach / 5 min by scooter",
+    insight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
+  },
+  "thong sala": {
+    displayName: "Thong Sala",
+    area: "Main town & ferry pier",
+    mapsUrl: "https://maps.google.com/?q=Thong+Sala+Koh+Phangan",
+    fromThongSala: "You're here",
+    fromSrithanu: "~10 min by scooter / songthaew 80 THB",
+    insight: "Best grocery stores, immigration office, and night market on the island.",
+  },
+  "eden club": {
+    displayName: "Eden Club",
+    area: "Haad Rin area",
+    mapsUrl: "https://maps.google.com/?q=Eden+Club+Koh+Phangan",
+    fromThongSala: "~30 min by scooter",
+    fromSrithanu: "~35 min by scooter",
+    insight: "Outdoor jungle setting. Smaller and more intimate than the main Haad Rin venues.",
+  },
+  "chaloklum": {
+    displayName: "Chaloklum",
+    area: "North coast",
+    mapsUrl: "https://maps.google.com/?q=Chaloklum+Koh+Phangan",
+    fromThongSala: "~25 min by scooter",
+    fromSrithanu: "~20 min by scooter",
+    insight: "Quieter fishing village feel. Boat trips to Koh Ma and Sail Rock depart from here.",
+  },
+  shivari: {
+    displayName: "Shivari",
+    area: "Srithanu",
+    mapsUrl: "https://maps.google.com/?q=Shivari+Koh+Phangan",
+    fromThongSala: "~12 min by scooter",
+    fromSrithanu: "5 min by scooter / 10 min walk",
+    insight: "Popular retreat and event venue. Usually has workshops and gatherings across the week.",
+  },
+  agama: {
+    displayName: "Agama Yoga",
+    area: "Srithanu",
+    mapsUrl: "https://maps.google.com/?q=Agama+Yoga+Koh+Phangan",
+    fromThongSala: "~12 min by scooter",
+    fromSrithanu: "5–10 min by scooter",
+    insight: "One of the most established yoga schools on the island. Month-long intensives fill up fast.",
+  },
+  "baan tai": {
+    displayName: "Baan Tai",
+    area: "South coast (between Thong Sala and Haad Rin)",
+    mapsUrl: "https://maps.google.com/?q=Baan+Tai+Koh+Phangan",
+    fromThongSala: "~10 min by scooter",
+    fromSrithanu: "~20 min by scooter",
+    insight: "The jungle party corridor. Many of the midweek electronic music events happen here.",
+  },
+  "haad yuan": {
+    displayName: "Haad Yuan",
+    area: "Southeast coast",
+    mapsUrl: "https://maps.google.com/?q=Haad+Yuan+Koh+Phangan",
+    fromThongSala: "~30 min by scooter + short walk / longtail from Haad Rin (~15 min)",
+    fromSrithanu: "~40 min by scooter",
+    insight: "One of the best swimming beaches. Quieter than the west coast, harder to reach — that's the point.",
+  },
+};
+
+/** Known venue name aliases for scanning SIT's own responses. */
+const KNOWN_VENUE_KEYS: string[] = Object.keys(VENUE_DB).sort((a, b) => b.length - a.length); // longest first
+
+/** Scan text for a known venue name and return the canonical key. */
+function extractVenueFromText(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  return KNOWN_VENUE_KEYS.find(key => lower.includes(key));
+}
+
+/** Format a VenueData record into the structured location card format. */
+function formatVenueCard(venue: VenueData): string {
+  const lines: string[] = [
+    `📍 ${venue.displayName}`,
+    ``,
+    `Area: ${venue.area}`,
+    ``,
+    `Google Maps: ${venue.mapsUrl}`,
+    ``,
+    `From Thong Sala: ${venue.fromThongSala}`,
+    `From Srithanu: ${venue.fromSrithanu}`,
+  ];
+  if (venue.walkNote) {
+    lines.push(``, `Note: ${venue.walkNote}`);
+  }
+  lines.push(``, `Local Insight:`, venue.insight);
+  return lines.join("\n");
 }
 
 /**
  * Answer a location or directions question.
- * First checks KB for a relevant card, then falls back to hardcoded transport knowledge.
+ * Uses the venue database directly — KB content cards are NOT used for directions.
  */
-function buildLocationAnswer(question: string, hits: { card: KBCard; score: number }[]): string {
+function buildLocationAnswer(question: string): string {
   const q = question.toLowerCase();
-  const subjects = extractLocationSubject(q);
 
-  // Try to find a KB card whose topic directly matches what was asked
-  const locationCard = hits.find(h => {
-    if (h.score < EXPERT_SCORE_MIN) return false;
-    const cardText = (h.card.topic + " " + h.card.description + " " + h.card.localInsight).toLowerCase();
-    return subjects.some(s => s.length > 3 && cardText.includes(s));
-  });
-
-  if (locationCard) {
-    const card = locationCard.card;
-    const main = firstSentences(card.localInsight || card.description, 2);
-    const insight = firstSentences(card.localSecret || card.localInsight, 1);
-    if (main && main.length > 20) {
-      return `${main}\n\nLocal Insight:\n${insight}`;
+  // Match against venue database (longest key first prevents partial matches)
+  for (const key of KNOWN_VENUE_KEYS) {
+    if (q.includes(key)) {
+      return formatVenueCard(VENUE_DB[key]!);
     }
   }
 
-  return buildTransportFallback(q);
-}
-
-function buildTransportFallback(q: string): string {
-  if (/lighthouse/.test(q)) {
-    return "Lighthouse is at the southern end of the island near Haad Rin.\n\n• Scooter: ~25–30 min from Srithanu\n• Taxi: 300–500 THB depending on time of night\n• Last stretch is a short walk down from the road\n\nLocal Insight:\nGo before midnight to enjoy the setting — it gets packed fast on party nights.";
-  }
-  if (/haad rin|hadrin/.test(q)) {
-    return "Haad Rin is at the southern tip — about 30 min from Thong Sala.\n\n• Scooter: easiest option\n• Songthaew (shared truck): 80–150 THB\n• Private taxi: 300–500 THB\n\nLocal Insight:\nHaad Rin and Srithanu feel like different islands. Decide which vibe you want first.";
-  }
-  if (/thong sala|town|pier|main (town|port)/.test(q)) {
-    return "Thong Sala is the main town and ferry pier.\n\n• Scooter from Srithanu: ~10 min\n• Songthaew from most areas: 60–100 THB\n• Grab: sometimes available, 150–250 THB\n\nLocal Insight:\nThong Sala has the best grocery stores, the immigration office, and a good night market.";
-  }
-  if (/srithanu|hin kong|hinkong/.test(q)) {
-    return "Srithanu is on the west coast, ~8 km north of Thong Sala.\n\n• Scooter: 10 min from town\n• Songthaew from the pier: 80 THB\n• Walk from Hinkong: 15 min along the beach\n\nLocal Insight:\nSrithanu and Hinkong blend into each other — most people stay somewhere between the two.";
-  }
+  // Common transport / infrastructure questions not tied to a specific venue
   if (/airport|fly|flight/.test(q)) {
-    return "There's no airport on Koh Phangan. Fly to Koh Samui (USM), then ferry over.\n\n• Samui → Koh Phangan ferry: 30 min, runs throughout the day\n• Bangkok → Koh Samui: ~1 hour, several flights daily\n• Cheaper route: Surat Thani + night ferry (longer but much cheaper)\n\nLocal Insight:\nLomprayah high-speed catamaran from Samui is the most popular option. Book ahead during Full Moon week — it sells out.";
+    return "No airport on Koh Phangan — fly to Koh Samui (USM), then take the ferry.\n\nFrom Samui:\n• Lomprayah catamaran: 30 min, runs all day\n• Bangkok → Samui: ~1 hour, several daily flights\n• Budget route: Surat Thani + night ferry (4 hours, much cheaper)\n\nGoogle Maps: https://maps.google.com/?q=Thong+Sala+Pier+Koh+Phangan\n\nLocal Insight:\nBook Lomprayah online — it sells out around Full Moon week.";
   }
   if (/ferry|boat|from samui|from koh tao|from surat/.test(q)) {
-    return "Main pier is Thong Sala.\n\n• From Koh Samui: 30–45 min (Lomprayah or Seatran)\n• From Koh Tao: 1.5–2 hours\n• From Surat Thani: 3–4 hours (night ferry available)\n\nLocal Insight:\nBook Lomprayah online. Seatran is walk-on but slower.";
-  }
-  if (/secret mountain/.test(q)) {
-    return "Secret Mountain is above Srithanu — scooter access only, steep road.\n\n• From Srithanu beachfront: 5–10 min by scooter up the hill\n• No GPS signal is reliable — follow the signs or ask a local\n• Not accessible without a scooter\n\nLocal Insight:\nThe view is worth it even when there's no event. Best at golden hour.";
+    return "📍 Thong Sala Pier\n\nArea: Main town\nGoogle Maps: https://maps.google.com/?q=Thong+Sala+Pier+Koh+Phangan\n\nFrom Koh Samui: 30–45 min (Lomprayah or Seatran)\nFrom Koh Tao: 1.5–2 hours\nFrom Surat Thani: 3–4 hours (night ferry available)\n\nLocal Insight:\nBook Lomprayah online. Seatran is walk-on but slower.";
   }
 
   // Generic transport answer
-  return "Getting around Koh Phangan:\n\n• Scooter: most flexible, 150–250 THB/day rental\n• Songthaew (shared truck-taxi): cheap but slow, follow the main road\n• Private taxi: 200–600 THB depending on distance\n• Grab: limited coverage but sometimes available\n\nLocal Insight:\nWithout a scooter, you're limited to the main road and whatever a taxi charges. A scooter changes everything.";
+  return "Getting around Koh Phangan:\n\n• Scooter: most flexible — 150–250 THB/day\n• Songthaew (shared truck): cheap, follows the main road\n• Private taxi: 200–600 THB depending on distance\n• Grab: limited coverage\n\nLocal Insight:\nWithout a scooter, you're limited to the main road. A scooter changes everything.";
 }
 
 /** Clips raw KB prose to at most N sentences so it never becomes an essay. */
@@ -773,6 +885,17 @@ export default function ChatScreen() {
     addMsg({ type: "text", sender: "sit", text });
   };
 
+  /**
+   * Like sitSay, but also scans SIT's response text for known venue names and
+   * stores the first match in conversationMemory so follow-ups like "location?"
+   * or "where is it?" can resolve without the user repeating the venue name.
+   */
+  const sitSayWithMemory = async (text: string, typingMs = 1100) => {
+    await sitSay(text, typingMs);
+    const venue = extractVenueFromText(text);
+    if (venue) conversationMemory.current.lastVenue = venue;
+  };
+
   // Boot sequence
   useEffect(() => {
     const boot = async () => {
@@ -826,19 +949,17 @@ export default function ChatScreen() {
 
     // ── LOCATION / DIRECTIONS — fires at any point ────────────────────────────
     if (intent === "location") {
-      // If the message is a bare follow-up ("location?", "where is it?") with no
-      // venue named, resolve against the last discussed venue from conversation memory.
-      const isShortFollowUp = trimmed.split(/\s+/).length <= 4 && !/ (of|for|at|to|near) /i.test(trimmed);
-      const queryForLocation = (isShortFollowUp && conversationMemory.current.lastVenue)
-        ? `where is ${conversationMemory.current.lastVenue}`
-        : trimmed;
+      // For bare follow-ups with no venue in the user's message,
+      // resolve against the last venue SIT mentioned in a previous response.
+      const venueInMessage = extractVenueFromText(trimmed);
+      const isShortFollowUp = trimmed.split(/\s+/).length <= 4;
+      const resolvedVenue = venueInMessage ?? (isShortFollowUp ? conversationMemory.current.lastVenue : undefined);
+      const queryForLocation = resolvedVenue ? `where is ${resolvedVenue}` : trimmed;
 
-      const hits = searchKBWithScore(queryForLocation, context.purpose, knowledgeBase, 5);
-      await sitSay(buildLocationAnswer(queryForLocation, hits), 1200);
-
-      // Extract and remember the venue for future follow-ups
-      const venueMatch = trimmed.match(/\b(?:of|to|at|for|is|'?s|find|reach|location of)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3})/);
-      if (venueMatch?.[1]) conversationMemory.current.lastVenue = venueMatch[1];
+      const answer = buildLocationAnswer(queryForLocation);
+      await sitSay(answer, 1200);
+      // Update memory with whatever venue we just answered about
+      if (resolvedVenue) conversationMemory.current.lastVenue = resolvedVenue;
 
       setLocked(false);
       inputRef.current?.focus();
@@ -850,12 +971,11 @@ export default function ChatScreen() {
       await sitSay("Let me check what's on...", 600);
       const { response, fallback } = await searchEvents(trimmed);
       if (fallback || !response) {
-        await sitSay(buildEventFallback(), 1200);
+        await sitSayWithMemory(buildEventFallback(), 1200);
       } else {
         const insight = getEventInsight(context.purpose);
-        await sitSay(`${response}\n\nLocal Insight:\n${insight}`, 1200);
+        await sitSayWithMemory(`${response}\n\nLocal Insight:\n${insight}`, 1200);
       }
-      // Remember that we were talking about events
       conversationMemory.current.lastTopic = "events";
       setLocked(false);
       inputRef.current?.focus();
@@ -880,9 +1000,9 @@ export default function ChatScreen() {
         const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
         const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
         if (expertAnswer) {
-          await sitSay(expertAnswer, 1200);
+          await sitSayWithMemory(expertAnswer, 1200);
         } else {
-          await sitSay(buildHonestFallback(trimmed), 1100);
+          await sitSayWithMemory(buildHonestFallback(trimmed), 1100);
         }
       } else {
         // Not a question — brief conversational acknowledgment, keep door open
@@ -926,9 +1046,9 @@ export default function ChatScreen() {
       const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
       const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
       if (expertAnswer) {
-        await sitSay(expertAnswer, 1200);
+        await sitSayWithMemory(expertAnswer, 1200);
       } else {
-        await sitSay(buildHonestFallback(trimmed), 1000);
+        await sitSayWithMemory(buildHonestFallback(trimmed), 1000);
       }
       // Only follow up with a discovery question if the intent was genuinely general
       // (definition/recommendation/advice) — not for questions that were fully answered.
