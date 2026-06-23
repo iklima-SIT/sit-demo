@@ -605,6 +605,16 @@ export default function ChatScreen() {
     // Brief has been shown — user is now asking follow-up questions or exploring.
     // Answer directly from KB when relevant. Never inject unrelated cards.
     if (isPostBrief) {
+      // Detect "yes I want a plan" — only if plans haven't been shown yet
+      const wantsPlan = !showPlans && /\b(yes|yeah|sure|plan|please|definitely|ok|okay|yep|yup|would love|sounds good|go ahead)\b/i.test(trimmed);
+      if (wantsPlan) {
+        await sitSay("Here are a few options:", 800);
+        setShowPlans(true);
+        setLocked(false);
+        inputRef.current?.focus();
+        return;
+      }
+
       if (isQuestion) {
         const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
         const expertAnswer = buildExpertAnswer(trimmed, hits);
@@ -645,16 +655,13 @@ export default function ChatScreen() {
       await new Promise(r => setTimeout(r, 2200));
       setIsTyping(false);
       addMsg({ type: "brief", sender: "sit", brief: buildBrief(response.updatedContext) });
-      await sitSay("Would you like me to build a personalized plan for your stay?", 1300);
-      setShowPlans(true);
+      await sitSay("Want me to put together a plan for your stay?", 1300);
       setLocked(false);
       return;
     }
 
     if (isQuestion) {
       // ── Question mid-discovery: answer first, then continue gathering context ──
-      // This is the LOCAL EXPERT MODE path triggered during discovery.
-      // Rule: answer the question → then ask the next discovery question.
       const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
       const expertAnswer = buildExpertAnswer(trimmed, hits);
       if (expertAnswer) {
@@ -662,14 +669,19 @@ export default function ChatScreen() {
       } else {
         await sitSay(buildHonestFallback(trimmed), 1000);
       }
-      // Continue discovery — ask the pending context question after a short pause
       await new Promise(r => setTimeout(r, 350));
       await sitSay(response.message, 900);
-      if (response.suggestions?.length) setSuggestions(response.suggestions);
+      // Only show chips if purpose is still unknown
+      if (!response.updatedContext.purpose && response.suggestions?.length) {
+        setSuggestions(response.suggestions);
+      }
     } else {
       // ── Pure discovery: show state machine response only — no KB injection ──
       await sitSay(response.message, 1100);
-      if (response.suggestions?.length) setSuggestions(response.suggestions);
+      // Only show chips if purpose is still unknown
+      if (!response.updatedContext.purpose && response.suggestions?.length) {
+        setSuggestions(response.suggestions);
+      }
     }
 
     setLocked(false);
