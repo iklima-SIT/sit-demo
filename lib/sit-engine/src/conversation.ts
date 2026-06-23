@@ -263,10 +263,10 @@ export function buildBrief(ctx: UserContext): SITBrief {
       "3 days with zero agenda",
     ],
     music: [
-      "Sunset gathering at Secret Mountain — that's where the real scene is",
-      "One Ecstatic Dance — no alcohol, no phones, completely different energy",
-      "One quiet beach bar evening to balance the intensity",
-      "Follow artists, not venues — best nights are announced last minute",
+      "Sunset gathering at Secret Mountain — that's where the serious music crowd is",
+      "One jungle party midweek — smaller, better music, fewer tourists",
+      "One beach bar evening to find the slower social side of the island",
+      "Follow artists on Instagram, not venues — the best nights are announced same-day",
     ],
     "remote-work": [
       "Lock in coworking with reliable internet in week one",

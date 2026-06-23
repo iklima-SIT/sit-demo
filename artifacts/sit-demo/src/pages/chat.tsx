@@ -98,10 +98,31 @@ function detectSociability(t: string): string | undefined {
   return undefined;
 }
 
-// ─── Event Search ────────────────────────────────────────────────────────────
+// ─── Intent Classification ───────────────────────────────────────────────────
 
+/**
+ * Returns true when the user is asking for a DEFINITION of something —
+ * "What is X?", "Explain X", "Tell me about X" — with no time reference.
+ * These should never trigger live event search.
+ */
+function isDefinitionQuestion(text: string): boolean {
+  const t = text.toLowerCase().trim();
+  if (/\b(tonight|today|this week|this weekend|right now|happening now|what.?s on)\b/.test(t)) return false;
+  return /^(what is|what'?s a |what are|explain|describe|tell me (what|about)|how does|what do you mean|define)\b/i.test(t);
+}
+
+/**
+ * Returns true when the user is asking what is happening RIGHT NOW or tonight/today.
+ * Only fires on explicit temporal + event signals — never on definition questions.
+ */
 function isEventQuery(text: string): boolean {
-  return /\b(event|events|tonight|today|this week|what'?s on|what is on|happening|party|parties|live music|ecstatic|dance|ceremony|gathering|festival|full.?moon|what.?s going|going on|schedule|agenda|where.?should i go|where to go)\b/i.test(text);
+  if (isDefinitionQuestion(text)) return false;
+  const t = text.toLowerCase();
+  // Must have a temporal signal OR an explicit "what's on / what's happening" phrase
+  const temporal = /\b(tonight|today|this (week|weekend|evening)|right now|happening now|what'?s on|what is on|what'?s going on|what'?s happening)\b/.test(t);
+  // Must have event intent
+  const eventIntent = /\b(event|events|party|parties|on|going on|happening|schedule|agenda|live|music|show)\b/.test(t);
+  return temporal && eventIntent || /\b(what'?s on|what is on|any (events|parties|shows) (tonight|today))\b/.test(t);
 }
 
 async function searchEvents(query: string): Promise<{ response: string | null; fallback: boolean }> {
@@ -120,14 +141,14 @@ async function searchEvents(query: string): Promise<{ response: string | null; f
 
 function getEventInsight(purpose?: string): string {
   const map: Record<string, string> = {
-    wellness:      "Skip the loud nights. Ecstatic Dance and morning yoga events are where the quality crowd goes.",
+    wellness:      "Morning events and sound healing nights are where the wellness crowd goes. Skip Haad Rin entirely.",
     music:         "Full Moon is the most marketed and often the least interesting night. The jungle parties midweek are where serious music happens.",
-    romance:       "Sunset beach gatherings and evening events around Hinkong are the right pace. Avoid Haad Rin if atmosphere matters.",
+    romance:       "Sunset beach gatherings around Hinkong are the right pace. Avoid Haad Rin if atmosphere matters.",
     community:     "Recurring weekly events are how the island works. Show up twice and you'll start recognising faces.",
-    "remote-work": "One event per week is enough. The ecstatic dance crowd overlaps heavily with the digital nomad scene.",
-    nature:        "Sunrise beach events and occasional jungle cleanups happen spontaneously — ask locally.",
-    moving:        "The weekly recurring events attract long-term residents, not tourists. That's your crowd.",
-    unsure:        "If you go to one thing, make it Ecstatic Dance. Best single introduction to what the island is actually about.",
+    "remote-work": "One social event per week is enough — the coworking crowd and the nomad meetups are your best options.",
+    nature:        "Sunrise beach swims and the occasional jungle hike meetup happen spontaneously — ask locally.",
+    moving:        "Weekly recurring events attract long-term residents, not tourists. That's your crowd.",
+    unsure:        "When in doubt, find a sunset gathering first. Low pressure, good mix of people, easy to leave.",
   };
   return map[purpose ?? "unsure"] ?? map["unsure"]!;
 }
@@ -339,10 +360,10 @@ function buildBrief(ctx: UserContext): SITBrief {
       "3 days with zero agenda",
     ],
     music: [
-      "Sunset gathering at Secret Mountain — that's where the real scene is",
-      "One Ecstatic Dance — no alcohol, no phones, completely different energy",
-      "One quiet beach bar evening to balance the intensity",
-      "Follow artists, not venues — best nights are announced last minute",
+      "Sunset gathering at Secret Mountain — that's where the serious music crowd is",
+      "One jungle party midweek — smaller, better music, fewer tourists",
+      "One beach bar evening to find the slower social side of the island",
+      "Follow artists on Instagram, not venues — the best nights are announced same-day",
     ],
     "remote-work": [
       "Lock in coworking with reliable internet in week one",
@@ -424,16 +445,37 @@ function firstSentences(text: string, n: number): string {
 }
 
 /**
+ * Returns true if a KB card clearly belongs to a conflicting purpose category.
+ * Used to prevent wellness cards surfacing for music users, etc.
+ */
+function isOffPurposeCard(card: KBCard, purpose: string): boolean {
+  const cat = card.category.toLowerCase();
+  const topic = card.topic.toLowerCase();
+  if (purpose === "music") {
+    return /yoga|ecstatic.?dance|meditation|breathwork|cacao|tantra|plant.?medicine|ceremony|sound.?healing|retreat|spiritual/.test(cat + " " + topic);
+  }
+  if (purpose === "wellness") {
+    return /party.?intelligence|music.?intelligence|full.?moon|nightlife/.test(cat);
+  }
+  return false;
+}
+
+/**
  * Tries to build a direct, KB-backed answer to the user's question.
  * Format: short answer → bullet points if available → one-line local insight.
  * Returns null if no card clears the relevance threshold.
  */
 function buildExpertAnswer(
   question: string,
-  hits: { card: KBCard; score: number }[]
+  hits: { card: KBCard; score: number }[],
+  purpose?: string
 ): string | null {
   const q = question.toLowerCase();
-  const strong = hits.filter(h => h.score >= EXPERT_SCORE_MIN);
+  // Filter out cards that clearly contradict the user's purpose
+  const purposeFiltered = purpose
+    ? hits.filter(h => !isOffPurposeCard(h.card, purpose))
+    : hits;
+  const strong = purposeFiltered.filter(h => h.score >= EXPERT_SCORE_MIN);
 
   // ── Real-time questions we genuinely can't answer ─────────────────────────
   if (/tonight|today|this week|what.?s on|happening now|event|schedule|lineup|right now/.test(q)) {
@@ -478,7 +520,7 @@ function buildHonestFallback(question: string): string {
   const q = question.toLowerCase();
 
   if (/tonight|today|what.?s on|happening|event|schedule|lineup/.test(q)) {
-    return "No live event feed — I can't tell you what's on right now.\n\nTell me what you're after:\n• House / techno\n• Live music\n• Ecstatic dance\n• Social sunset gathering\n\nI'll point you to the right type of venue.";
+    return "No live event feed — I can't tell you what's on right now.\n\nTell me what you're after:\n• Electronic / techno / house\n• Live band music\n• Sunset social gathering\n• Quieter bar scene\n\nI'll point you to the right type of venue.";
   }
   if (/cost|price|how much|expensive|cheap|budget/.test(q)) {
     return "Rough daily costs:\n• Budget: $30–50\n• Mid-range: $60–100\n• Comfortable: $100–150+\n\nLocal insight:\nAccommodation near the main areas is 30% cheaper if you book direct.";
@@ -683,7 +725,7 @@ export default function ChatScreen() {
 
       if (isQuestion) {
         const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
-        const expertAnswer = buildExpertAnswer(trimmed, hits);
+        const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
         if (expertAnswer) {
           await sitSay(expertAnswer, 1200);
         } else {
@@ -729,7 +771,7 @@ export default function ChatScreen() {
     if (isQuestion) {
       // ── Question mid-discovery: answer first, then continue gathering context ──
       const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
-      const expertAnswer = buildExpertAnswer(trimmed, hits);
+      const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
       if (expertAnswer) {
         await sitSay(expertAnswer, 1200);
       } else {
