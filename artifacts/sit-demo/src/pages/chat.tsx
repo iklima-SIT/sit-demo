@@ -98,6 +98,57 @@ function detectSociability(t: string): string | undefined {
   return undefined;
 }
 
+// ─── Event Search ────────────────────────────────────────────────────────────
+
+function isEventQuery(text: string): boolean {
+  return /\b(event|events|tonight|today|this week|what'?s on|what is on|happening|party|parties|live music|ecstatic|dance|ceremony|gathering|festival|full.?moon|what.?s going|going on|schedule|agenda|where.?should i go|where to go)\b/i.test(text);
+}
+
+async function searchEvents(query: string): Promise<{ response: string | null; fallback: boolean }> {
+  try {
+    const res = await fetch("/api/events/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) return { response: null, fallback: true };
+    return (await res.json()) as { response: string | null; fallback: boolean };
+  } catch {
+    return { response: null, fallback: true };
+  }
+}
+
+function getEventInsight(purpose?: string): string {
+  const map: Record<string, string> = {
+    wellness:      "Skip the loud nights. Ecstatic Dance and morning yoga events are where the quality crowd goes.",
+    music:         "Full Moon is the most marketed and often the least interesting night. The jungle parties midweek are where serious music happens.",
+    romance:       "Sunset beach gatherings and evening events around Hinkong are the right pace. Avoid Haad Rin if atmosphere matters.",
+    community:     "Recurring weekly events are how the island works. Show up twice and you'll start recognising faces.",
+    "remote-work": "One event per week is enough. The ecstatic dance crowd overlaps heavily with the digital nomad scene.",
+    nature:        "Sunrise beach events and occasional jungle cleanups happen spontaneously — ask locally.",
+    moving:        "The weekly recurring events attract long-term residents, not tourists. That's your crowd.",
+    unsure:        "If you go to one thing, make it Ecstatic Dance. Best single introduction to what the island is actually about.",
+  };
+  return map[purpose ?? "unsure"] ?? map["unsure"]!;
+}
+
+function buildEventFallback(): string {
+  return [
+    "I couldn't verify tonight's schedule.",
+    "",
+    "Places I'd check first:",
+    "",
+    "• Secret Mountain — sunset gatherings & jungle music",
+    "• Agama Yoga — community events & workshops",
+    "• Srithanu beachfront — weekly Ecstatic Dance (usually Sundays)",
+    "• Orion Healing — retreats & plant medicine ceremonies",
+    "• Haad Rin — live music nightly (louder, more touristy)",
+    "",
+    "Local Insight:",
+    "Best nights are announced same-day. Follow venue Instagram pages for last-minute events.",
+  ].join("\n");
+}
+
 // ─── Acknowledgments ──────────────────────────────────────────────────────────
 
 function ack(purpose: string): string {
@@ -600,6 +651,21 @@ export default function ChatScreen() {
 
     const isQuestion = isDirectQuestion(trimmed);
     const isPostBrief = context.briefGenerated;
+
+    // ── EVENT QUERY — fires at any point in the conversation ─────────────────
+    if (isEventQuery(trimmed)) {
+      await sitSay("Let me check what's on...", 600);
+      const { response, fallback } = await searchEvents(trimmed);
+      if (fallback || !response) {
+        await sitSay(buildEventFallback(), 1200);
+      } else {
+        const insight = getEventInsight(context.purpose);
+        await sitSay(`${response}\n\nLocal Insight:\n${insight}`, 1200);
+      }
+      setLocked(false);
+      inputRef.current?.focus();
+      return;
+    }
 
     // ── POST-BRIEF: LOCAL EXPERT MODE ────────────────────────────────────────
     // Brief has been shown — user is now asking follow-up questions or exploring.
