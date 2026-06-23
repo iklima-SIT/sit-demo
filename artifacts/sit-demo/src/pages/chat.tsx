@@ -452,8 +452,12 @@ function classifyIntent(text: string): QueryIntent {
 
   const t = text.toLowerCase();
 
-  // Location / directions — "How do I get to X?", "Where is X?", "How far?", "Taxi?"
-  if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|directions? (to|from)|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
+  // Location / directions — all patterns that signal the user wants to know WHERE something is or HOW TO GET there
+  if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|where can i find|directions? (to|from)|location (of|for|to)?|send (me )?(the )?location|maps?|google maps|address (of|for)?|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
+    return "location";
+  }
+  // Short bare follow-ups that signal location intent ("location?", "directions?", "maps?", "where?")
+  if (/^(location|directions?|maps?|where|address|how to get there|how do i get there|get there|navigate|navigation)\??$/.test(t.trim())) {
     return "location";
   }
 
@@ -745,6 +749,12 @@ export default function ChatScreen() {
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Conversation memory — persists across renders without causing re-renders
+  const conversationMemory = useRef<{
+    lastVenue?: string;   // last venue / place name mentioned
+    lastTopic?: string;   // last broad topic (events, beaches, food, etc.)
+  }>({});
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, showPlans]);
@@ -816,8 +826,20 @@ export default function ChatScreen() {
 
     // ── LOCATION / DIRECTIONS — fires at any point ────────────────────────────
     if (intent === "location") {
-      const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
-      await sitSay(buildLocationAnswer(trimmed, hits), 1200);
+      // If the message is a bare follow-up ("location?", "where is it?") with no
+      // venue named, resolve against the last discussed venue from conversation memory.
+      const isShortFollowUp = trimmed.split(/\s+/).length <= 4 && !/ (of|for|at|to|near) /i.test(trimmed);
+      const queryForLocation = (isShortFollowUp && conversationMemory.current.lastVenue)
+        ? `where is ${conversationMemory.current.lastVenue}`
+        : trimmed;
+
+      const hits = searchKBWithScore(queryForLocation, context.purpose, knowledgeBase, 5);
+      await sitSay(buildLocationAnswer(queryForLocation, hits), 1200);
+
+      // Extract and remember the venue for future follow-ups
+      const venueMatch = trimmed.match(/\b(?:of|to|at|for|is|'?s|find|reach|location of)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3})/);
+      if (venueMatch?.[1]) conversationMemory.current.lastVenue = venueMatch[1];
+
       setLocked(false);
       inputRef.current?.focus();
       return;
@@ -833,6 +855,8 @@ export default function ChatScreen() {
         const insight = getEventInsight(context.purpose);
         await sitSay(`${response}\n\nLocal Insight:\n${insight}`, 1200);
       }
+      // Remember that we were talking about events
+      conversationMemory.current.lastTopic = "events";
       setLocked(false);
       inputRef.current?.focus();
       return;
@@ -906,11 +930,16 @@ export default function ChatScreen() {
       } else {
         await sitSay(buildHonestFallback(trimmed), 1000);
       }
-      await new Promise(r => setTimeout(r, 350));
-      await sitSay(response.message, 900);
-      // Only show chips if purpose is still unknown
-      if (!response.updatedContext.purpose && response.suggestions?.length) {
-        setSuggestions(response.suggestions);
+      // Only follow up with a discovery question if the intent was genuinely general
+      // (definition/recommendation/advice) — not for questions that were fully answered.
+      // This prevents "How long are you staying?" appearing after a specific factual answer.
+      const shouldAskDiscovery = intent === "general" || intent === "advice";
+      if (shouldAskDiscovery) {
+        await new Promise(r => setTimeout(r, 350));
+        await sitSay(response.message, 900);
+        if (!response.updatedContext.purpose && response.suggestions?.length) {
+          setSuggestions(response.suggestions);
+        }
       }
     } else {
       // ── Pure discovery: show state machine response only — no KB injection ──
