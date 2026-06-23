@@ -438,6 +438,108 @@ function isDirectQuestion(text: string): boolean {
   return /^(what|where|when|how|who|which|is there|are there|can i|do you|is it|tell me about|recommend|suggest|any |does |will |should |could |find me|show me)/i.test(text.trim());
 }
 
+// ─── Intent Classification ─────────────────────────────────────────────────────
+
+type QueryIntent = "location" | "event_live" | "definition" | "recommendation" | "planning" | "advice" | "general";
+
+/**
+ * Classify the user's message into ONE intent bucket before generating a response.
+ * Order matters — more specific checks run first.
+ */
+function classifyIntent(text: string): QueryIntent {
+  if (isDefinitionQuestion(text)) return "definition";
+  if (isEventQuery(text)) return "event_live";
+
+  const t = text.toLowerCase();
+
+  // Location / directions — "How do I get to X?", "Where is X?", "How far?", "Taxi?"
+  if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|directions? (to|from)|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
+    return "location";
+  }
+
+  // Planning — "Build me a 7-day plan", "itinerary", "day by day"
+  if (/\b(itinerary|day.by.day|day \d|week plan|\d.day plan|build.*(plan|schedule)|create.*(plan|schedule)|write.*(plan|itinerary))\b/.test(t)) {
+    return "planning";
+  }
+
+  // Personal advice — "Is this right for me?", "Should I come?"
+  if (/\b(right for me|is it worth|would i (enjoy|like|fit)|for someone like|my situation|should i (come|go|try|visit)|do you think i should)\b/.test(t)) {
+    return "advice";
+  }
+
+  // Recommendation — "Best beach?", "Where should I stay?"
+  if (/\b(best|recommend|suggest|where should|good place|top|favourite|where can i find|find me)\b/.test(t)) {
+    return "recommendation";
+  }
+
+  return "general";
+}
+
+// ─── Location / Directions Handler ────────────────────────────────────────────
+
+/** Extract key noun from a location question to match against KB cards. */
+function extractLocationSubject(q: string): string[] {
+  // Remove question words and transport verbs to expose the destination
+  return q
+    .replace(/\b(how|can|do|i|get|to|from|where|is|it|the|a|an|reach|go|find|taxi|scooter|transport|ferry|boat|far|long|take|near|close|located)\b/gi, " ")
+    .split(/\W+/)
+    .filter(w => w.length > 2);
+}
+
+/**
+ * Answer a location or directions question.
+ * First checks KB for a relevant card, then falls back to hardcoded transport knowledge.
+ */
+function buildLocationAnswer(question: string, hits: { card: KBCard; score: number }[]): string {
+  const q = question.toLowerCase();
+  const subjects = extractLocationSubject(q);
+
+  // Try to find a KB card whose topic directly matches what was asked
+  const locationCard = hits.find(h => {
+    if (h.score < EXPERT_SCORE_MIN) return false;
+    const cardText = (h.card.topic + " " + h.card.description + " " + h.card.localInsight).toLowerCase();
+    return subjects.some(s => s.length > 3 && cardText.includes(s));
+  });
+
+  if (locationCard) {
+    const card = locationCard.card;
+    const main = firstSentences(card.localInsight || card.description, 2);
+    const insight = firstSentences(card.localSecret || card.localInsight, 1);
+    if (main && main.length > 20) {
+      return `${main}\n\nLocal Insight:\n${insight}`;
+    }
+  }
+
+  return buildTransportFallback(q);
+}
+
+function buildTransportFallback(q: string): string {
+  if (/lighthouse/.test(q)) {
+    return "Lighthouse is at the southern end of the island near Haad Rin.\n\n• Scooter: ~25–30 min from Srithanu\n• Taxi: 300–500 THB depending on time of night\n• Last stretch is a short walk down from the road\n\nLocal Insight:\nGo before midnight to enjoy the setting — it gets packed fast on party nights.";
+  }
+  if (/haad rin|hadrin/.test(q)) {
+    return "Haad Rin is at the southern tip — about 30 min from Thong Sala.\n\n• Scooter: easiest option\n• Songthaew (shared truck): 80–150 THB\n• Private taxi: 300–500 THB\n\nLocal Insight:\nHaad Rin and Srithanu feel like different islands. Decide which vibe you want first.";
+  }
+  if (/thong sala|town|pier|main (town|port)/.test(q)) {
+    return "Thong Sala is the main town and ferry pier.\n\n• Scooter from Srithanu: ~10 min\n• Songthaew from most areas: 60–100 THB\n• Grab: sometimes available, 150–250 THB\n\nLocal Insight:\nThong Sala has the best grocery stores, the immigration office, and a good night market.";
+  }
+  if (/srithanu|hin kong|hinkong/.test(q)) {
+    return "Srithanu is on the west coast, ~8 km north of Thong Sala.\n\n• Scooter: 10 min from town\n• Songthaew from the pier: 80 THB\n• Walk from Hinkong: 15 min along the beach\n\nLocal Insight:\nSrithanu and Hinkong blend into each other — most people stay somewhere between the two.";
+  }
+  if (/airport|fly|flight/.test(q)) {
+    return "There's no airport on Koh Phangan. Fly to Koh Samui (USM), then ferry over.\n\n• Samui → Koh Phangan ferry: 30 min, runs throughout the day\n• Bangkok → Koh Samui: ~1 hour, several flights daily\n• Cheaper route: Surat Thani + night ferry (longer but much cheaper)\n\nLocal Insight:\nLomprayah high-speed catamaran from Samui is the most popular option. Book ahead during Full Moon week — it sells out.";
+  }
+  if (/ferry|boat|from samui|from koh tao|from surat/.test(q)) {
+    return "Main pier is Thong Sala.\n\n• From Koh Samui: 30–45 min (Lomprayah or Seatran)\n• From Koh Tao: 1.5–2 hours\n• From Surat Thani: 3–4 hours (night ferry available)\n\nLocal Insight:\nBook Lomprayah online. Seatran is walk-on but slower.";
+  }
+  if (/secret mountain/.test(q)) {
+    return "Secret Mountain is above Srithanu — scooter access only, steep road.\n\n• From Srithanu beachfront: 5–10 min by scooter up the hill\n• No GPS signal is reliable — follow the signs or ask a local\n• Not accessible without a scooter\n\nLocal Insight:\nThe view is worth it even when there's no event. Best at golden hour.";
+  }
+
+  // Generic transport answer
+  return "Getting around Koh Phangan:\n\n• Scooter: most flexible, 150–250 THB/day rental\n• Songthaew (shared truck-taxi): cheap but slow, follow the main road\n• Private taxi: 200–600 THB depending on distance\n• Grab: limited coverage but sometimes available\n\nLocal Insight:\nWithout a scooter, you're limited to the main road and whatever a taxi charges. A scooter changes everything.";
+}
+
 /** Clips raw KB prose to at most N sentences so it never becomes an essay. */
 function firstSentences(text: string, n: number): string {
   const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
