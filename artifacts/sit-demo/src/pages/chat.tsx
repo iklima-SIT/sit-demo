@@ -593,7 +593,24 @@ function buildExpertAnswer(
 
   if (strong.length === 0) return null;
 
-  const top = strong[0].card;
+  // ── Card relevance guard ───────────────────────────────────────────────────
+  // Ensure the top card is actually about what the user asked.
+  // Extract meaningful words from the question and check they appear in the card.
+  const questionKeywords = q
+    .replace(/\b(what|where|when|how|who|which|is|it|the|a|an|are|was|were|do|does|can|i|you|me|my|your|in|on|at|of|to|for|and|or|but|with|from|that|this|they|them|their|about|tell|know|any|best|good)\b/g, " ")
+    .split(/\W+/)
+    .filter(w => w.length > 3);
+
+  // Find the first card whose topic or content contains at least one key word from the question
+  const relevantCard = strong.find(h => {
+    if (questionKeywords.length === 0) return true; // no keywords to check — pass through
+    const cardText = (h.card.topic + " " + h.card.description + " " + h.card.localInsight + " " + (h.card.localSecret ?? "")).toLowerCase();
+    return questionKeywords.some(kw => cardText.includes(kw));
+  });
+
+  if (!relevantCard) return null;
+
+  const top = relevantCard.card;
 
   // Build bullet points from bestFor field if it has structured data
   const bullets = top.bestFor
@@ -795,9 +812,19 @@ export default function ChatScreen() {
 
     const isQuestion = isDirectQuestion(trimmed);
     const isPostBrief = context.briefGenerated;
+    const intent = classifyIntent(trimmed);
+
+    // ── LOCATION / DIRECTIONS — fires at any point ────────────────────────────
+    if (intent === "location") {
+      const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
+      await sitSay(buildLocationAnswer(trimmed, hits), 1200);
+      setLocked(false);
+      inputRef.current?.focus();
+      return;
+    }
 
     // ── EVENT QUERY — fires at any point in the conversation ─────────────────
-    if (isEventQuery(trimmed)) {
+    if (intent === "event_live") {
       await sitSay("Let me check what's on...", 600);
       const { response, fallback } = await searchEvents(trimmed);
       if (fallback || !response) {
