@@ -993,11 +993,10 @@ export default function ChatScreen() {
 
     // ── LOCATION / DIRECTIONS — fires at any point ────────────────────────────
     if (intent === "location") {
-      // For bare follow-ups with no venue in the user's message,
-      // resolve against the last venue SIT mentioned in a previous response.
+      // We're already inside the location handler — the user wants a pin.
+      // Check the message text first; fall back to whatever venue SIT last mentioned.
       const venueInMessage = extractVenueFromText(trimmed);
-      const isShortFollowUp = trimmed.split(/\s+/).length <= 4;
-      const resolvedVenue = venueInMessage ?? (isShortFollowUp ? conversationMemory.current.lastVenue : undefined);
+      const resolvedVenue = venueInMessage ?? conversationMemory.current.lastVenue;
       const queryForLocation = resolvedVenue ? `where is ${resolvedVenue}` : trimmed;
 
       const answer = buildLocationAnswer(queryForLocation);
@@ -1094,10 +1093,10 @@ export default function ChatScreen() {
       } else {
         await sitSayWithMemory(buildHonestFallback(trimmed), 1000);
       }
-      // Only follow up with a discovery question if the intent was genuinely general
-      // (definition/recommendation/advice) — not for questions that were fully answered.
-      // This prevents "How long are you staying?" appearing after a specific factual answer.
-      const shouldAskDiscovery = intent === "general" || intent === "advice";
+      // Only follow up with a discovery question if the intent is vague AND the message
+      // contains no direct-request signals. Any concrete request keyword kills onboarding.
+      const HARD_DIRECT_RE = /\b(location|map|pin|directions?|how much|price|ticket|opening.?hours|address|website|instagram|event|tonight|today|party|parties|google.?maps|where is|send|available|what time|when does|how (do|can|to)|show me|find me|is there|are there)\b/i;
+      const shouldAskDiscovery = (intent === "general" || intent === "advice") && !HARD_DIRECT_RE.test(trimmed);
       if (shouldAskDiscovery) {
         await new Promise(r => setTimeout(r, 350));
         await sitSay(response.message, 900);
@@ -1106,11 +1105,35 @@ export default function ChatScreen() {
         }
       }
     } else {
-      // ── Pure discovery: show state machine response only — no KB injection ──
-      await sitSay(response.message, 1100);
-      // Only show chips if purpose is still unknown
-      if (!response.updatedContext.purpose && response.suggestions?.length) {
-        setSuggestions(response.suggestions);
+      // ── Pure discovery: non-question message ─────────────────────────────────
+      // If message references a known venue or contains a hard direct signal,
+      // answer from KB instead of advancing onboarding.
+      const HARD_DIRECT_RE = /\b(location|map|pin|directions?|how much|price|ticket|opening.?hours|address|website|instagram|event|tonight|today|party|parties|google.?maps|where is|send|available|what time|when does|show me|find me|is there|are there)\b/i;
+      const venueRef = extractVenueFromText(trimmed);
+      const hasDirectSignal = HARD_DIRECT_RE.test(trimmed);
+
+      if (venueRef || hasDirectSignal) {
+        // Treat as an implicit question — lookup KB and answer directly, no onboarding follow-up
+        const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
+        const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
+        if (expertAnswer) {
+          await sitSayWithMemory(expertAnswer, 1200);
+        } else {
+          // If KB has nothing, give the venue pin if we have a venue ref
+          if (venueRef) {
+            const answer = buildLocationAnswer(`where is ${venueRef}`);
+            await sitSay(answer, 1200);
+            conversationMemory.current.lastVenue = venueRef;
+          } else {
+            await sitSayWithMemory(buildHonestFallback(trimmed), 1000);
+          }
+        }
+      } else {
+        // Genuinely conversational — advance the discovery state machine
+        await sitSay(response.message, 1100);
+        if (!response.updatedContext.purpose && response.suggestions?.length) {
+          setSuggestions(response.suggestions);
+        }
       }
     }
 
