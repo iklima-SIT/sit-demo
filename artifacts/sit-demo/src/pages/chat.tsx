@@ -1030,7 +1030,7 @@ export default function ChatScreen() {
     // Answer directly from KB when relevant. Never inject unrelated cards.
     if (isPostBrief) {
       // Detect "yes I want a plan" — only if plans haven't been shown yet
-      const wantsPlan = !showPlans && /\b(yes|yeah|sure|plan|please|definitely|ok|okay|yep|yup|would love|sounds good|go ahead)\b/i.test(trimmed);
+      const wantsPlan = !showPlans && /\b(plan|itinerary|schedule|day.by.day|show me (a |the )?plan|put together (a )?plan|yes (please|i (would|want))|yes.*(plan|itinerary)|i('d| would) (love|like) (a |that )?plan)\b/i.test(trimmed);
       if (wantsPlan) {
         await sitSay("Here are a few options:", 800);
         setShowPlans(true);
@@ -1039,7 +1039,11 @@ export default function ChatScreen() {
         return;
       }
 
-      if (isQuestion) {
+      // Topic-signal keywords — any of these mean the user wants an answer, not an ack
+      const TOPIC_RE = /\b(yoga|class|classes|studio|workshop|retreat|meditation|teacher|event|party|parties|tonight|today|tomorrow|this week|next week|beach|restaurant|café|cafe|food|eat|drink|bar|nightlife|accommodation|stay|hotel|hostel|villa|wellness|massage|spa|transport|scooter|taxi|ferry|location|map|pin|address|price|cost|ticket|website|instagram|music|concert|dj|market|hike|waterfall|snorkel|dive|surf|swim|cowork|internet|wifi|sim|atm|bank|hospital|clinic|visa|immigration)\b/i;
+      const isTopicQuestion = isQuestion || TOPIC_RE.test(trimmed);
+
+      if (isTopicQuestion) {
         const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
         const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
         if (expertAnswer) {
@@ -1048,9 +1052,8 @@ export default function ChatScreen() {
           await sitSayWithMemory(buildHonestFallback(trimmed), 1100);
         }
       } else {
-        // Not a question — brief conversational acknowledgment, keep door open
+        // Genuinely conversational — brief acknowledgment, keep door open
         const acks = [
-          "Good to know. Anything else you want to nail down before you arrive?",
           "Makes sense. What else is on your radar?",
           "Worth keeping in mind. Anything specific you want me to look into?",
           "Fair enough. What else would be useful to know?",
@@ -1085,7 +1088,9 @@ export default function ChatScreen() {
     }
 
     if (isQuestion) {
-      // ── Question mid-discovery: answer first, then continue gathering context ──
+      // ── Question mid-discovery: answer and stop — never append onboarding ─────
+      // The question is the priority. Discovery context is extracted from what the
+      // user writes; we never interrupt an answer with a profiling question.
       const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
       const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
       if (expertAnswer) {
@@ -1093,17 +1098,7 @@ export default function ChatScreen() {
       } else {
         await sitSayWithMemory(buildHonestFallback(trimmed), 1000);
       }
-      // Only follow up with a discovery question if the intent is vague AND the message
-      // contains no direct-request signals. Any concrete request keyword kills onboarding.
-      const HARD_DIRECT_RE = /\b(location|map|pin|directions?|how much|price|ticket|opening.?hours|address|website|instagram|event|tonight|today|party|parties|google.?maps|where is|send|available|what time|when does|how (do|can|to)|show me|find me|is there|are there)\b/i;
-      const shouldAskDiscovery = (intent === "general" || intent === "advice") && !HARD_DIRECT_RE.test(trimmed);
-      if (shouldAskDiscovery) {
-        await new Promise(r => setTimeout(r, 350));
-        await sitSay(response.message, 900);
-        if (!response.updatedContext.purpose && response.suggestions?.length) {
-          setSuggestions(response.suggestions);
-        }
-      }
+      // No discovery follow-up — ever. Golden rule: answer completely, then stop.
     } else {
       // ── Pure discovery: non-question message ─────────────────────────────────
       // If message references a known venue or contains a hard direct signal,
