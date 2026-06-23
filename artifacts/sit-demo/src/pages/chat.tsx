@@ -453,15 +453,19 @@ function classifyIntent(text: string): QueryIntent {
   const t = text.toLowerCase();
 
   // Location / directions — all patterns that signal the user wants to know WHERE something is or HOW TO GET there
-  if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|where can i find|directions? (to|from)|location (of|for|to)?|send (me )?(the )?location|maps?|google maps|address (of|for)?|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
+  if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|where can i find|directions? (to|from)|send .{0,20}(location|pin)|maps?|google maps|address|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
     return "location";
   }
-  // Short bare follow-ups that signal location intent ("location?", "pin?", "maps?", "send location", etc.)
-  if (/^(location|directions?|maps?|where|address|pin|send location|send me the location|send me the pin|can you send the location|how to get there|how do i get there|get there|navigate|navigation)\??$/.test(t.trim())) {
+  // "location" anywhere in the message almost always means "give me the pin" in this context
+  if (/\blocation\b/.test(t)) {
     return "location";
   }
-  // Multi-word patterns that always mean "give me the map pin"
-  if (/\b(send (me )?(the )?(location|pin)|can you send (the )?(location|pin)|drop (a |the )?pin|share (the )?location|what'?s? the (address|pin|location))\b/.test(t)) {
+  // Short bare follow-ups ("pin?", "maps?", "address?", "directions?", etc.)
+  if (/^(directions?|maps?|where|address|pin|how to get there|how do i get there|get there|navigate|navigation)\??$/.test(t.trim())) {
+    return "location";
+  }
+  // "drop a pin", "share the location", "can you send me the pin", etc.
+  if (/\b(drop (a |the )?pin|share .{0,10}(location|pin)|can you send .{0,20}(location|pin)|what'?s? the (address|pin))\b/.test(t)) {
     return "location";
   }
 
@@ -986,6 +990,24 @@ export default function ChatScreen() {
     setLocked(true);
 
     addMsg({ type: "text", sender: "user", text: trimmed });
+
+    // ── MEMORY-FIRST HARD BLOCK ───────────────────────────────────────────────
+    // If the last venue is known and the user is signalling a location request,
+    // return the pin immediately — never touch the KB or run classification.
+    const MEM_LOCATION_RE = /\b(location|map|pin|address|directions?|google maps|where is it|how (do i |to )?get there|send (me )?.{0,20}(location|pin))\b/i;
+    {
+      const venueRefEarly = extractVenueFromText(trimmed);
+      const lastVenueMemory = conversationMemory.current.lastVenue;
+      // Hard block: lastVenue known + user asking location with NO venue name in the message
+      // (if they named a venue, the normal location handler will pick it up via classifyIntent)
+      if (lastVenueMemory && !venueRefEarly && MEM_LOCATION_RE.test(trimmed)) {
+        const answer = buildLocationAnswer(`where is ${lastVenueMemory}`);
+        await sitSay(answer, 1200);
+        setLocked(false);
+        inputRef.current?.focus();
+        return;
+      }
+    }
 
     const isQuestion = isDirectQuestion(trimmed);
     const isPostBrief = context.briefGenerated;
