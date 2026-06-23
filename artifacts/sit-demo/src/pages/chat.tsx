@@ -456,8 +456,12 @@ function classifyIntent(text: string): QueryIntent {
   if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|where can i find|directions? (to|from)|location (of|for|to)?|send (me )?(the )?location|maps?|google maps|address (of|for)?|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
     return "location";
   }
-  // Short bare follow-ups that signal location intent ("location?", "directions?", "maps?", "where?")
-  if (/^(location|directions?|maps?|where|address|how to get there|how do i get there|get there|navigate|navigation)\??$/.test(t.trim())) {
+  // Short bare follow-ups that signal location intent ("location?", "pin?", "maps?", "send location", etc.)
+  if (/^(location|directions?|maps?|where|address|pin|send location|send me the location|send me the pin|can you send the location|how to get there|how do i get there|get there|navigate|navigation)\??$/.test(t.trim())) {
+    return "location";
+  }
+  // Multi-word patterns that always mean "give me the map pin"
+  if (/\b(send (me )?(the )?(location|pin)|can you send (the )?(location|pin)|drop (a |the )?pin|share (the )?location|what'?s? the (address|pin|location))\b/.test(t)) {
     return "location";
   }
 
@@ -497,7 +501,7 @@ const VENUE_DB: Record<string, VenueData> = {
   lighthouse: {
     displayName: "Lighthouse",
     area: "Haad Rin (south tip)",
-    mapsUrl: "https://maps.google.com/?q=Lighthouse+Haad+Rin+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Lighthouse+Bungalows+Koh+Phangan",
     fromThongSala: "~30 min by scooter / 400–500 THB taxi",
     fromSrithanu: "~30–35 min by scooter / 500 THB taxi",
     insight: "Go before midnight — it fills fast on party nights.",
@@ -506,7 +510,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "secret mountain": {
     displayName: "Secret Mountain",
     area: "Hills above Srithanu (west coast)",
-    mapsUrl: "https://maps.google.com/?q=Secret+Mountain+Bar+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Secret+Mountain+Bar+Koh+Phangan",
     fromThongSala: "~15 min by scooter",
     fromSrithanu: "5–10 min by scooter up the hill",
     insight: "GPS is unreliable here. Follow the signs or ask locally.",
@@ -515,7 +519,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "haad rin": {
     displayName: "Haad Rin",
     area: "South tip of the island",
-    mapsUrl: "https://maps.google.com/?q=Haad+Rin+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Haad+Rin+Beach+Koh+Phangan",
     fromThongSala: "~30 min by scooter / songthaew 80–150 THB",
     fromSrithanu: "~35 min by scooter",
     insight: "Haad Rin and Srithanu feel like different islands. Decide which vibe you want before committing.",
@@ -523,7 +527,7 @@ const VENUE_DB: Record<string, VenueData> = {
   srithanu: {
     displayName: "Srithanu",
     area: "West coast, 8 km north of Thong Sala",
-    mapsUrl: "https://maps.google.com/?q=Srithanu+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Srithanu+Koh+Phangan",
     fromThongSala: "~10 min by scooter / songthaew 80 THB",
     fromSrithanu: "You're here",
     insight: "The wellness, yoga, and coworking hub. Srithanu and Hinkong blend into each other.",
@@ -531,7 +535,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "hin kong": {
     displayName: "Hin Kong (Hinkong)",
     area: "West coast, just south of Srithanu",
-    mapsUrl: "https://maps.google.com/?q=Hinkong+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Hin+Kong+Beach+Koh+Phangan",
     fromThongSala: "~10 min by scooter",
     fromSrithanu: "15 min walk along the beach / 5 min by scooter",
     insight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
@@ -539,7 +543,7 @@ const VENUE_DB: Record<string, VenueData> = {
   hinkong: {
     displayName: "Hin Kong (Hinkong)",
     area: "West coast, just south of Srithanu",
-    mapsUrl: "https://maps.google.com/?q=Hinkong+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Hin+Kong+Beach+Koh+Phangan",
     fromThongSala: "~10 min by scooter",
     fromSrithanu: "15 min walk along the beach / 5 min by scooter",
     insight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
@@ -547,7 +551,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "thong sala": {
     displayName: "Thong Sala",
     area: "Main town & ferry pier",
-    mapsUrl: "https://maps.google.com/?q=Thong+Sala+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Koh+Phangan",
     fromThongSala: "You're here",
     fromSrithanu: "~10 min by scooter / songthaew 80 THB",
     insight: "Best grocery stores, immigration office, and night market on the island.",
@@ -555,7 +559,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "eden club": {
     displayName: "Eden Club",
     area: "Haad Rin area",
-    mapsUrl: "https://maps.google.com/?q=Eden+Club+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Eden+Club+Koh+Phangan",
     fromThongSala: "~30 min by scooter",
     fromSrithanu: "~35 min by scooter",
     insight: "Outdoor jungle setting. Smaller and more intimate than the main Haad Rin venues.",
@@ -563,7 +567,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "chaloklum": {
     displayName: "Chaloklum",
     area: "North coast",
-    mapsUrl: "https://maps.google.com/?q=Chaloklum+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Chaloklum+Koh+Phangan",
     fromThongSala: "~25 min by scooter",
     fromSrithanu: "~20 min by scooter",
     insight: "Quieter fishing village feel. Boat trips to Koh Ma and Sail Rock depart from here.",
@@ -571,7 +575,7 @@ const VENUE_DB: Record<string, VenueData> = {
   shivari: {
     displayName: "Shivari",
     area: "Srithanu",
-    mapsUrl: "https://maps.google.com/?q=Shivari+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Shivari+Koh+Phangan",
     fromThongSala: "~12 min by scooter",
     fromSrithanu: "5 min by scooter / 10 min walk",
     insight: "Popular retreat and event venue. Usually has workshops and gatherings across the week.",
@@ -579,7 +583,7 @@ const VENUE_DB: Record<string, VenueData> = {
   agama: {
     displayName: "Agama Yoga",
     area: "Srithanu",
-    mapsUrl: "https://maps.google.com/?q=Agama+Yoga+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Agama+Yoga+School+Koh+Phangan",
     fromThongSala: "~12 min by scooter",
     fromSrithanu: "5–10 min by scooter",
     insight: "One of the most established yoga schools on the island. Month-long intensives fill up fast.",
@@ -587,7 +591,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "baan tai": {
     displayName: "Baan Tai",
     area: "South coast (between Thong Sala and Haad Rin)",
-    mapsUrl: "https://maps.google.com/?q=Baan+Tai+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Baan+Tai+Koh+Phangan",
     fromThongSala: "~10 min by scooter",
     fromSrithanu: "~20 min by scooter",
     insight: "The jungle party corridor. Many of the midweek electronic music events happen here.",
@@ -595,7 +599,7 @@ const VENUE_DB: Record<string, VenueData> = {
   "haad yuan": {
     displayName: "Haad Yuan",
     area: "Southeast coast",
-    mapsUrl: "https://maps.google.com/?q=Haad+Yuan+Koh+Phangan",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Haad+Yuan+Beach+Koh+Phangan",
     fromThongSala: "~30 min by scooter + short walk / longtail from Haad Rin (~15 min)",
     fromSrithanu: "~40 min by scooter",
     insight: "One of the best swimming beaches. Quieter than the west coast, harder to reach — that's the point.",
@@ -611,23 +615,31 @@ function extractVenueFromText(text: string): string | undefined {
   return KNOWN_VENUE_KEYS.find(key => lower.includes(key));
 }
 
-/** Format a VenueData record into the structured location card format. */
+/** Format a VenueData record into the structured map-pin card format. */
 function formatVenueCard(venue: VenueData): string {
-  const lines: string[] = [
+  const transportLines = [`• From Thong Sala: ${venue.fromThongSala}`];
+  if (venue.fromSrithanu !== "You're here") {
+    transportLines.push(`• From Srithanu: ${venue.fromSrithanu}`);
+  }
+  if (venue.walkNote) {
+    transportLines.push(`• Note: ${venue.walkNote}`);
+  }
+
+  return [
     `📍 ${venue.displayName}`,
     ``,
-    `Area: ${venue.area}`,
+    `Area:`,
+    venue.area,
     ``,
-    `Google Maps: ${venue.mapsUrl}`,
+    `Google Maps:`,
+    venue.mapsUrl,
     ``,
-    `From Thong Sala: ${venue.fromThongSala}`,
-    `From Srithanu: ${venue.fromSrithanu}`,
-  ];
-  if (venue.walkNote) {
-    lines.push(``, `Note: ${venue.walkNote}`);
-  }
-  lines.push(``, `Local Insight:`, venue.insight);
-  return lines.join("\n");
+    `How to get there:`,
+    ...transportLines,
+    ``,
+    `Local Insight:`,
+    venue.insight,
+  ].join("\n");
 }
 
 /**
@@ -644,16 +656,48 @@ function buildLocationAnswer(question: string): string {
     }
   }
 
-  // Common transport / infrastructure questions not tied to a specific venue
+  // Airport / arrival — these are genuinely infrastructure questions, keep the map pin
   if (/airport|fly|flight/.test(q)) {
-    return "No airport on Koh Phangan — fly to Koh Samui (USM), then take the ferry.\n\nFrom Samui:\n• Lomprayah catamaran: 30 min, runs all day\n• Bangkok → Samui: ~1 hour, several daily flights\n• Budget route: Surat Thani + night ferry (4 hours, much cheaper)\n\nGoogle Maps: https://maps.google.com/?q=Thong+Sala+Pier+Koh+Phangan\n\nLocal Insight:\nBook Lomprayah online — it sells out around Full Moon week.";
+    return [
+      "📍 Thong Sala Pier (main arrival point)",
+      "",
+      "Area:",
+      "Thong Sala — main town",
+      "",
+      "Google Maps:",
+      "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Pier+Koh+Phangan",
+      "",
+      "How to get there:",
+      "• Fly to Koh Samui (USM), then take the Lomprayah ferry — 30 min",
+      "• Bangkok → Samui: ~1 hour, several flights daily",
+      "• Budget route: Surat Thani + night ferry (~4 hours, cheaper)",
+      "",
+      "Local Insight:",
+      "Book Lomprayah online — it sells out around Full Moon week.",
+    ].join("\n");
   }
   if (/ferry|boat|from samui|from koh tao|from surat/.test(q)) {
-    return "📍 Thong Sala Pier\n\nArea: Main town\nGoogle Maps: https://maps.google.com/?q=Thong+Sala+Pier+Koh+Phangan\n\nFrom Koh Samui: 30–45 min (Lomprayah or Seatran)\nFrom Koh Tao: 1.5–2 hours\nFrom Surat Thani: 3–4 hours (night ferry available)\n\nLocal Insight:\nBook Lomprayah online. Seatran is walk-on but slower.";
+    return [
+      "📍 Thong Sala Pier",
+      "",
+      "Area:",
+      "Main town",
+      "",
+      "Google Maps:",
+      "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Pier+Koh+Phangan",
+      "",
+      "How to get there:",
+      "• From Koh Samui: 30–45 min (Lomprayah or Seatran)",
+      "• From Koh Tao: 1.5–2 hours",
+      "• From Surat Thani: 3–4 hours (night ferry available)",
+      "",
+      "Local Insight:",
+      "Book Lomprayah online. Seatran is walk-on but slower.",
+    ].join("\n");
   }
 
-  // Generic transport answer
-  return "Getting around Koh Phangan:\n\n• Scooter: most flexible — 150–250 THB/day\n• Songthaew (shared truck): cheap, follows the main road\n• Private taxi: 200–600 THB depending on distance\n• Grab: limited coverage\n\nLocal Insight:\nWithout a scooter, you're limited to the main road. A scooter changes everything.";
+  // No venue known — ask which place rather than dumping generic transport info
+  return "Which place do you want the pin for?";
 }
 
 /** Clips raw KB prose to at most N sentences so it never becomes an essay. */
