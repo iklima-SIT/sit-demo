@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "az2M08QSyVztEzKQ6jgKh"
+uri = "file://sit-demo-project.tar.gz"
+type = "unspecified"
+title = "SIT Demo — Full Project Archive"
