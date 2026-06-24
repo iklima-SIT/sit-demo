@@ -6,3 +6,9 @@ id = "az2M08QSyVztEzKQ6jgKh"
 uri = "file://sit-demo-project.tar.gz"
 type = "unspecified"
 title = "SIT Demo — Full Project Archive"
+
+[[outputs]]
+id = "91Ymc6O0tUwEhmYMiPABE"
+uri = "file://sit-demo-source.zip"
+type = "unspecified"
+title = "SIT Demo — Source Code (353 KB)"
