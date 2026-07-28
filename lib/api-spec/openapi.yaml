@@ -10,6 +10,10 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: conversation
+    description: Canonical SIT conversation sessions and turns
+  - name: knowledge
+    description: Server-side SIT knowledge repository
 paths:
   /healthz:
     get:
@@ -24,6 +28,128 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /conversation/session:
+    post:
+      operationId: createOrLoadConversationSession
+      tags: [conversation]
+      summary: Create or load a conversation session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationSessionRequest"
+      responses:
+        "200":
+          description: Conversation session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSessionResponse"
+  /conversation/turn:
+    post:
+      operationId: sendConversationTurn
+      tags: [conversation]
+      summary: Send one user turn through the canonical runner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationTurnRequest"
+      responses:
+        "200":
+          description: Runner output and updated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationTurnResponse"
+  /conversation/reset:
+    post:
+      operationId: resetConversationSession
+      tags: [conversation]
+      summary: Reset a conversation session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+              required: [sessionId]
+      responses:
+        "200":
+          description: Reset session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSessionResponse"
+  /knowledge/version:
+    get:
+      operationId: getKnowledgeVersion
+      tags: [knowledge]
+      summary: Get active knowledge import version
+      responses:
+        "200":
+          description: Knowledge version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeVersionResponse"
+  /knowledge/search:
+    post:
+      operationId: searchKnowledge
+      tags: [knowledge]
+      summary: Diagnostic lexical knowledge search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                purpose:
+                  type: string
+                travelerType:
+                  type: string
+                limit:
+                  type: integer
+              required: [query]
+      responses:
+        "200":
+          description: Search hits with scores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeSearchResponse"
+  /knowledge/import:
+    post:
+      operationId: importKnowledgeWorkbook
+      tags: [knowledge]
+      summary: Import a SIT knowledge workbook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fileName:
+                  type: string
+                dataBase64:
+                  type: string
+              required: [fileName, dataBase64]
+      responses:
+        "200":
+          description: Import metadata and report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeImportResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +159,167 @@ components:
           type: string
       required:
         - status
-
+    ConversationSessionRequest:
+      type: object
+      properties:
+        userKey:
+          type: string
+        channel:
+          type: string
+          enum: [web, whatsapp, test]
+      required: [channel]
+    ConversationTurnRequest:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        userKey:
+          type: string
+        channel:
+          type: string
+          enum: [web, whatsapp, test]
+        message:
+          type: string
+        devTrace:
+          type: boolean
+      required: [message, channel]
+    ConversationSession:
+      type: object
+      properties:
+        id:
+          type: string
+        userKey:
+          type: string
+        channel:
+          type: string
+        stateVersion:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        expiresAt:
+          type: string
+      required: [id, userKey, channel, stateVersion, createdAt, updatedAt, expiresAt]
+    ConversationSessionResponse:
+      type: object
+      properties:
+        session:
+          $ref: "#/components/schemas/ConversationSession"
+      required: [session]
+    AssistantMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [text]
+        text:
+          type: string
+      required: [type, text]
+    ConversationTurnResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantMessage"
+        session:
+          $ref: "#/components/schemas/ConversationSession"
+        suggestions:
+          type: array
+          items:
+            type: string
+        planOptions:
+          type: array
+          items:
+            type: string
+        trace:
+          type: object
+        decision:
+          type: object
+        knowledge:
+          type: object
+      required: [messages, session]
+    KnowledgeImportMetadata:
+      type: object
+      properties:
+        version:
+          type: string
+        importedAt:
+          type: string
+        sourceWorkbook:
+          type: string
+        sheetName:
+          type: string
+        cardCount:
+          type: integer
+      required: [version, importedAt, sourceWorkbook, sheetName, cardCount]
+    KnowledgeCard:
+      type: object
+      properties:
+        id: { type: string }
+        category: { type: string }
+        subcategory: { type: string }
+        topic: { type: string }
+        travelerType: { type: string }
+        myth: { type: string }
+        reality: { type: string }
+        deepLocalInsight: { type: string }
+        psychologicalLayer: { type: string }
+        recommendedFor: { type: string }
+        notRecommendedFor: { type: string }
+        aiRecommendationLogic: { type: string }
+        relatedCategories:
+          type: array
+          items: { type: string }
+        hiddenBenefit: { type: string }
+        hiddenRisk: { type: string }
+        updateFrequency: { type: string }
+        confidence: { type: string }
+        priorityScore: { type: number }
+        sourceExpert: { type: string }
+        architectureLayer: { type: string }
+        masterCategory: { type: string }
+        dataMoatScore: { type: number }
+        monetizationScore: { type: number }
+        investorValueScore: { type: number }
+        localityScore: { type: number }
+        status: { type: string }
+        version: { type: string }
+        importedAt: { type: string }
+      required: [id, category, topic, version, importedAt]
+    KnowledgeVersionResponse:
+      type: object
+      properties:
+        version:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/KnowledgeImportMetadata"
+      required: [version, metadata]
+    KnowledgeSearchResponse:
+      type: object
+      properties:
+        version:
+          type: string
+        importedAt:
+          type: string
+        hits:
+          type: array
+          items:
+            type: object
+            properties:
+              card:
+                $ref: "#/components/schemas/KnowledgeCard"
+              score:
+                type: number
+      required: [version, hits]
+    KnowledgeImportResponse:
+      type: object
+      properties:
+        metadata:
+          $ref: "#/components/schemas/KnowledgeImportMetadata"
+        report:
+          type: object
+        files:
+          type: object
+      required: [metadata, report]

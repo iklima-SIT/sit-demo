@@ -1,0 +1,100 @@
+name: Feature
+description: Propose a focused product or engineering capability.
+title: "[Feature]: "
+labels:
+  - feature
+body:
+  - type: input
+    id: title
+    attributes:
+      label: Title
+      description: A short, outcome-focused name for the feature.
+      placeholder: Improve human connection discovery
+    validations:
+      required: true
+
+  - type: input
+    id: requested-by
+    attributes:
+      label: Requested by
+      placeholder: Iklima or Stefano
+    validations:
+      required: true
+
+  - type: input
+    id: primary-owner
+    attributes:
+      label: Primary Owner
+      description: One person must own scope and completion.
+      placeholder: Iklima or Stefano
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product-area
+    attributes:
+      label: Product Area
+      options:
+        - Conversation Orchestrator
+        - Discovery
+        - Decision
+        - Events
+        - Knowledge
+        - Memory
+        - Developer Console
+        - UI
+        - Infrastructure
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What traveler, product, or team problem should this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behaviour
+    attributes:
+      label: Expected Behaviour
+      description: Describe the intended observable outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: List the conditions that must be true before this is complete.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: relevant-documents
+    attributes:
+      label: Relevant Documents
+      description: Link the applicable philosophy, architecture, or product documents.
+      placeholder: docs/mind/DECISION_ENGINE.md
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - MVP blocking
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional context, examples, constraints, or links.
+

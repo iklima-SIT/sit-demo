@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
+import { createLiveEventSearchInput, searchLiveEvents } from "../services/event-service";
 
 const router: IRouter = Router();
 
 /**
  * GET /api/test-exa
- * Diagnostic endpoint — runs a live Exa search for "Koh Phangan events tonight"
- * and returns the raw API response (no fallback, no SIT processing).
+ * Diagnostic endpoint — runs the same live event service used by production.
  */
 router.get("/test-exa", async (req, res): Promise<void> => {
   const apiKey = process.env.EXA_API_KEY;
@@ -23,55 +23,25 @@ router.get("/test-exa", async (req, res): Promise<void> => {
     return;
   }
 
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "Asia/Bangkok",
-  });
-
-  const searchQuery = `Koh Phangan Thailand events and parties happening tonight ${today}. Include event names, venues, start times, and DJ lineups if available.`;
-
-  let rawStatus: number | null = null;
-  let rawBody: unknown = null;
-  let requestError: string | null = null;
-
   try {
-    const exaRes = await fetch("https://api.exa.ai/answer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        query: searchQuery,
-        text: true,
-      }),
-    });
-
-    rawStatus = exaRes.status;
-    rawBody = await exaRes.json();
-
-    req.log.info({ rawStatus, query: searchQuery }, "test-exa diagnostic completed");
+    const result = await searchLiveEvents(createLiveEventSearchInput("Koh Phangan events tonight"), apiKey);
+    req.log.info({ httpStatus: result.httpStatus, query: result.queryUsed }, "test-exa diagnostic completed");
 
     res.json({
-      ok: exaRes.ok,
+      ok: !result.fallback,
       keyStatus,
-      httpStatus: rawStatus,
-      queryUsed: searchQuery,
-      rawResponse: rawBody,
+      httpStatus: result.httpStatus,
+      queryUsed: result.queryUsed,
+      timeWindow: result.timeWindow,
+      rawResponse: result.rawResponse,
     });
   } catch (err) {
-    requestError = err instanceof Error ? err.message : String(err);
+    const error = err instanceof Error ? err.message : String(err);
     req.log.error({ err }, "test-exa diagnostic failed");
     res.json({
       ok: false,
       keyStatus,
-      httpStatus: rawStatus,
-      queryUsed: searchQuery,
-      error: requestError,
-      rawResponse: rawBody,
+      error,
     });
   }
 });

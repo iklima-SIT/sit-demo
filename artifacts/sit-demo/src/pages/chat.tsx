@@ -1,16 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Upload, Database, X } from "lucide-react";
+import { Bug, Database, Download, Send, Upload, X } from "lucide-react";
 import { useLocation } from "wouter";
 import type { KeyboardEvent, ChangeEvent } from "react";
+import type { ConversationState } from "@workspace/sit-engine";
 import {
-  type KBCard,
-  EMBEDDED_KB,
-  searchKBWithScore,
-  parseXlsxToCards,
-} from "@/lib/knowledge-base";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+  type AssistantMessage,
+  type DeveloperConsolePayload,
+  type SITBrief,
+  createOrLoadWebSession,
+  getKnowledgeVersion,
+  importKnowledgeFile,
+  sendConversationTurn,
+} from "@/lib/conversation-api";
 
 type Sender = "sit" | "user";
 
@@ -32,798 +34,10 @@ interface BriefMessage {
 
 type Message = TextMessage | BriefMessage;
 
-interface SITBrief {
-  lookingFor: string;
-  avoid: string[];
-  stayArea: string;
-  experiences: string[];
-  localInsight: string;
-}
-
-interface UserContext {
-  purpose?: string;
-  purposeFollowUpAsked: boolean;
-  duration?: string;
-  durationAsked: boolean;
-  scooter?: string;
-  scooterAsked: boolean;
-  sociability?: string;
-  sociabilityAsked: boolean;
-  exchangeCount: number;
-  briefGenerated: boolean;
-}
-
-interface SITResponse {
-  message: string;
-  suggestions?: string[];
-  briefReady?: boolean;
-  updatedContext: UserContext;
-}
-
-// ─── Parsing ─────────────────────────────────────────────────────────────────
-
-function detectPurpose(t: string): string | undefined {
-  if (/wellness|yoga|health|spiritual|retreat|meditation|healing|detox|cleanse|mindful|ceremony/.test(t)) return "wellness";
-  if (/music|party|parties|dance|dj|full.?moon|nightlife|rave|festival|electronic/.test(t)) return "music";
-  if (/work|remote|laptop|productivity|cowork|startup|digital.?nomad|freelan|build/.test(t)) return "remote-work";
-  if (/romance|partner|love|honeymoon|couple|girlfriend|boyfriend|romantic/.test(t)) return "romance";
-  if (/community|friends|belong|connect|tribe/.test(t)) return "community";
-  if (/nature|jungle|beach|swim|hike|outdoor|island|waterfall/.test(t)) return "nature";
-  if (/move|relocate|live here|settle|expat|emigrat|permanent/.test(t)) return "moving";
-  if (/not.?sure|unsure|don.?t know|open|flexible|reset|escape|break|burnout|tired|overwhelm|change/.test(t)) return "unsure";
-  return undefined;
-}
-
-function detectDuration(t: string): string | undefined {
-  if (/\b[345]\s*days?|\bfew days\b|long.?weekend/.test(t)) return "short";
-  if (/\b(6|7|8|9|10)\s*days?|\bone\s*week|\b1\s*week/.test(t)) return "week";
-  if (/\b(2|3|4)\s*weeks?|couple.?of?.?weeks|fortnight|10.?days/.test(t)) return "few-weeks";
-  if (/\b(1|2|3)\s*months?|30.?days|60.?days/.test(t)) return "months";
-  if (/long.?term|indefinite|moving|settling|permanent/.test(t)) return "long-term";
-  return undefined;
-}
-
-function detectScooter(t: string): string | undefined {
-  if (/\byes\b|\bi do\b|i ride|i drive|can ride|comfortable|no problem|definitely/.test(t)) return "yes";
-  if (/\bno\b|can.?t|don.?t ride|not comfortable|never ridden|afraid|too risky/.test(t)) return "no";
-  if (/learn|trying|beginner|not confident|getting there/.test(t)) return "learning";
-  if (/prefer not|taxi|grab|songthaew|rather not|avoid it/.test(t)) return "prefer-not";
-  return undefined;
-}
-
-function detectSociability(t: string): string | undefined {
-  if (/alone|solo|myself|introvert|quiet|private|mostly.?alone|own.?pace/.test(t)) return "alone";
-  if (/balanc|mix|both|middle|sometimes|depends|flexible/.test(t)) return "balanced";
-  if (/social|people|meet|outgoing|extrovert|very.?social|love.?people|lots.?of/.test(t)) return "social";
-  return undefined;
-}
-
-// ─── Intent Classification ───────────────────────────────────────────────────
-
-/**
- * Returns true when the user is asking for a DEFINITION of something —
- * "What is X?", "Explain X", "Tell me about X" — with no time reference.
- * These should never trigger live event search.
- */
-function isDefinitionQuestion(text: string): boolean {
-  const t = text.toLowerCase().trim();
-  if (/\b(tonight|today|this week|this weekend|right now|happening now|what.?s on)\b/.test(t)) return false;
-  return /^(what is|what'?s a |what are|explain|describe|tell me (what|about)|how does|what do you mean|define)\b/i.test(t);
-}
-
-/**
- * Returns true when the user is asking what is happening RIGHT NOW or tonight/today.
- * Only fires on explicit temporal + event signals — never on definition questions.
- */
-function isEventQuery(text: string): boolean {
-  if (isDefinitionQuestion(text)) return false;
-  const t = text.toLowerCase();
-  // Must have a temporal signal OR an explicit "what's on / what's happening" phrase
-  const temporal = /\b(tonight|today|this (week|weekend|evening)|right now|happening now|what'?s on|what is on|what'?s going on|what'?s happening)\b/.test(t);
-  // Must have event intent
-  const eventIntent = /\b(event|events|party|parties|on|going on|happening|schedule|agenda|live|music|show)\b/.test(t);
-  return temporal && eventIntent || /\b(what'?s on|what is on|any (events|parties|shows) (tonight|today))\b/.test(t);
-}
-
-async function searchEvents(query: string): Promise<{ response: string | null; fallback: boolean }> {
-  try {
-    const res = await fetch("/api/events/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-    });
-    if (!res.ok) return { response: null, fallback: true };
-    return (await res.json()) as { response: string | null; fallback: boolean };
-  } catch {
-    return { response: null, fallback: true };
-  }
-}
-
-function getEventInsight(purpose?: string): string {
-  const map: Record<string, string> = {
-    wellness:      "Morning events and sound healing nights are where the wellness crowd goes. Skip Haad Rin entirely.",
-    music:         "Full Moon is the most marketed and often the least interesting night. The jungle parties midweek are where serious music happens.",
-    romance:       "Sunset beach gatherings around Hinkong are the right pace. Avoid Haad Rin if atmosphere matters.",
-    community:     "Recurring weekly events are how the island works. Show up twice and you'll start recognising faces.",
-    "remote-work": "One social event per week is enough — the coworking crowd and the nomad meetups are your best options.",
-    nature:        "Sunrise beach swims and the occasional jungle hike meetup happen spontaneously — ask locally.",
-    moving:        "Weekly recurring events attract long-term residents, not tourists. That's your crowd.",
-    unsure:        "When in doubt, find a sunset gathering first. Low pressure, good mix of people, easy to leave.",
-  };
-  return map[purpose ?? "unsure"] ?? map["unsure"]!;
-}
-
-function buildEventFallback(): string {
-  return [
-    "I couldn't verify tonight's schedule.",
-    "",
-    "Places I'd check first:",
-    "",
-    "• Secret Mountain — sunset gatherings & jungle music",
-    "• Agama Yoga — community events & workshops",
-    "• Srithanu beachfront — weekly Ecstatic Dance (usually Sundays)",
-    "• Orion Healing — retreats & plant medicine ceremonies",
-    "• Haad Rin — live music nightly (louder, more touristy)",
-    "",
-    "Local Insight:",
-    "Best nights are announced same-day. Follow venue Instagram pages for last-minute events.",
-  ].join("\n");
-}
-
-// ─── Acknowledgments ──────────────────────────────────────────────────────────
-
-function ack(purpose: string): string {
-  const map: Record<string, string> = {
-    wellness: "A lot of people come here for exactly that.",
-    music: "You've picked the right island for it.",
-    "remote-work": "Smart call — the infrastructure here has gotten serious.",
-    romance: "Koh Phangan delivers on that one, when you know where to look.",
-    community: "This island is unusually good at building that kind of thing.",
-    nature: "There's more of it than the Instagram version lets on.",
-    moving: "Interesting. A few thousand people have made exactly that move.",
-    unsure: "Honestly, that's a valid way to arrive. Sometimes the island decides for you.",
-  };
-  return map[purpose] ?? "Good to know.";
-}
-
-// ─── Conversation Engine ──────────────────────────────────────────────────────
-
-function processMessage(userMessage: string, ctx: UserContext): SITResponse {
-  const t = userMessage.toLowerCase();
-  const c = { ...ctx };
-
-  if (!c.purpose) c.purpose = detectPurpose(t);
-  if (!c.duration) c.duration = detectDuration(t);
-  if (!c.scooter) c.scooter = detectScooter(t);
-  if (!c.sociability) c.sociability = detectSociability(t);
-
-  c.exchangeCount++;
-
-  if (!c.purpose) {
-    return {
-      message: "What's bringing you to Koh Phangan?",
-      suggestions: ["Wellness", "Music & parties", "Remote work", "Romance", "Community", "Nature", "Moving here", "Not sure yet"],
-      updatedContext: c,
-    };
-  }
-
-  if (!c.purposeFollowUpAsked) {
-    c.purposeFollowUpAsked = true;
-    const a = ack(c.purpose);
-    const followUps: Record<string, { message: string; suggestions?: string[] }> = {
-      wellness: {
-        message: `${a} What specifically — rest, spirituality, personal growth, or something physical?`,
-        suggestions: ["Rest", "Spirituality", "Personal growth", "Physical health", "A mix"],
-      },
-      music: {
-        message: `${a} Music, social energy, or the all-night experience?`,
-        suggestions: ["Great music", "Social energy", "All-night parties", "All of it"],
-      },
-      "remote-work": {
-        message: `${a} Already productive remotely, or looking for a better rhythm?`,
-        suggestions: ["Already productive", "Need a better routine", "Bit of both"],
-      },
-      romance: {
-        message: `${a} Traveling with a partner, or solo?`,
-        suggestions: ["With a partner", "Solo"],
-      },
-      community: {
-        message: `${a} What type — creative, spiritual, wellness, or just genuine connection?`,
-        suggestions: ["Creative", "Spiritual", "Wellness", "Entrepreneurial", "Human connection"],
-      },
-      nature: {
-        message: `${a} Active (hiking, swimming) or contemplative (sunsets, quiet beaches)?`,
-        suggestions: ["Active", "Contemplative", "Both"],
-      },
-      moving: {
-        message: `${a} What needs to be different in your life if you make the move?`,
-      },
-      unsure: {
-        message: `${a} Need genuine rest, or hoping something will happen here?`,
-        suggestions: ["Genuine rest", "Looking for something", "Somewhere between"],
-      },
-    };
-    const fu = followUps[c.purpose] ?? { message: "Tell me more." };
-    return { ...fu, updatedContext: c };
-  }
-
-  if (!c.duration && !c.durationAsked) {
-    c.durationAsked = true;
-    return {
-      message: "How long are you here for?",
-      suggestions: ["3–5 days", "1 week", "2–4 weeks", "1–3 months", "Long-term"],
-      updatedContext: c,
-    };
-  }
-
-  if (!c.scooter && !c.scooterAsked) {
-    c.scooterAsked = true;
-    return {
-      message: "Do you ride a scooter?",
-      suggestions: ["Yes", "No", "Still learning", "I'd rather not"],
-      updatedContext: c,
-    };
-  }
-
-  if (!c.sociability && !c.sociabilityAsked) {
-    c.sociabilityAsked = true;
-    return {
-      message: "One more thing — how social do you want this trip to be?",
-      suggestions: ["Mostly on my own", "Balanced", "Very social"],
-      updatedContext: c,
-    };
-  }
-
-  const hasEnough = c.purpose && c.exchangeCount >= 4;
-  if (hasEnough && !c.briefGenerated) {
-    c.briefGenerated = true;
-    return {
-      message: "I think I have a clear enough picture. Let me put your SIT Brief together.",
-      briefReady: true,
-      updatedContext: c,
-    };
-  }
-
-  const ongoing = [
-    "What else is on your mind about the trip?",
-    "That's a fair question. What's driving it for you?",
-    "Makes sense. Anything specific you want me to factor into your plan?",
-    "Worth thinking about. What matters most to you there?",
-    "Good point. Is there anything else I should know?",
-  ];
-  return {
-    message: ongoing[c.exchangeCount % ongoing.length],
-    updatedContext: c,
-  };
-}
-
-// ─── Brief Builder ────────────────────────────────────────────────────────────
-
-function buildBrief(ctx: UserContext): SITBrief {
-  const lookingForMap: Record<string, string> = {
-    wellness:      "A genuine reset — not a spa break. The quality gap here is extreme, so where you go matters.",
-    music:         "Somewhere that feels alive beyond Full Moon. The real scene exists — you just have to know where to look.",
-    "remote-work": "A base that actually works. The infrastructure is there; managing the island's pull on your focus is the challenge.",
-    romance:       "Beautiful, unhurried, off the main drag. Koh Phangan delivers — in the right area.",
-    community:     "To actually belong somewhere, not just pass through. More achievable here than most places.",
-    nature:        "The real island, not the filtered version. Quiet beaches, actual jungle — it exists.",
-    moving:        "To evaluate, not just visit. That's a different question and needs a different approach.",
-    unsure:        "You're open. That's the best way to arrive — the island tends to show you quickly.",
-  };
-
-  const lookingFor = lookingForMap[ctx.purpose ?? "unsure"] ?? lookingForMap.unsure!;
-
-  const avoid: string[] = [];
-  if (ctx.scooter === "no" || ctx.scooter === "prefer-not") {
-    avoid.push("Remote accommodation — transport costs compound fast without a scooter");
-  }
-  if (ctx.purpose === "wellness") {
-    avoid.push("Unresearched ceremonies or retreats — quality range is extreme");
-    avoid.push("Heavily marketed wellness packages — good teachers don't need to advertise hard");
-  }
-  if (ctx.purpose === "music") {
-    avoid.push("Planning everything around Full Moon — it's a party, not a music festival");
-    avoid.push("Judging the scene by Haad Rin — that's the smallest slice");
-  }
-  if (ctx.purpose === "remote-work") {
-    avoid.push("Expecting full productivity in week one — adjustment period is real");
-  }
-  if (ctx.sociability === "alone") {
-    avoid.push("Haad Rin — it doesn't sleep");
-  }
-  if (avoid.length === 0) {
-    avoid.push("Haad Rin tourist traps — quality drops, prices don't");
-    avoid.push("Trying to cover the whole island — depth beats coverage");
-  }
-
-  let stayArea: string;
-  if (ctx.scooter === "no" || ctx.scooter === "prefer-not") {
-    stayArea = "Srithanu or Thong Sala — walkable, coastal, everything within reach. Don't book remotely without a scooter.";
-  } else {
-    const areaMap: Record<string, string> = {
-      wellness:      "Srithanu — the wellness hub. Everything within 5 minutes, quieter energy.",
-      music:         "Baan Tai (jungle venues) or Haad Rin (classic scene) — depends how deep you want to go.",
-      romance:       "Hinkong — quiet, intimate, world-class sunsets.",
-      "remote-work": "Srithanu or Thong Sala — reliable wifi, coworking, good cafés.",
-      community:     "Srithanu — recurring events and social circles concentrate here.",
-      nature:        "North coast — Chaloklum or the hills above Srithanu. Wake up in it.",
-      moving:        "Don't commit on arrival. Try three areas before deciding.",
-    };
-    stayArea = areaMap[ctx.purpose ?? ""] ?? "Srithanu — versatile base, easy to expand from.";
-  }
-
-  const experienceMap: Record<string, string[]> = {
-    wellness: [
-      "One week at a reputable yoga school — consistency beats intensity",
-      "Cacao or sound healing with a vetted facilitator",
-      "Daily morning swim before the heat hits",
-      "3 days with zero agenda",
-    ],
-    music: [
-      "Sunset gathering at Secret Mountain — that's where the serious music crowd is",
-      "One jungle party midweek — smaller, better music, fewer tourists",
-      "One beach bar evening to find the slower social side of the island",
-      "Follow artists on Instagram, not venues — the best nights are announced same-day",
-    ],
-    "remote-work": [
-      "Lock in coworking with reliable internet in week one",
-      "One recurring activity from day one — yoga, sport, anything social",
-      "At least one full day off per week",
-      "Attend a coworking social — the people here are unusually good",
-    ],
-    romance: [
-      "Sunset at Hinkong — low tide picnic or SUP at golden hour",
-      "Private longtail to a quiet beach (~$60)",
-      "One proper dinner in Thong Sala town",
-    ],
-    community: [
-      "One recurring class — go every single time",
-      "Weekly sunset gatherings — same faces, real connections",
-      "Coworking membership even if you're not working",
-      "Women's or men's circles if that resonates — both well-run",
-    ],
-    nature: [
-      "Jungle hike to the viewpoint — genuinely undercrowded",
-      "Haad Yuan or Thong Nai Pan Noi — swimmable and quiet",
-      "Sail Rock snorkel trip — one of SE Asia's best sites",
-      "One night with no light pollution",
-    ],
-    moving: [
-      "3 areas minimum before deciding where to live",
-      "Visit during a normal week — not Full Moon",
-      "Talk to long-term expats, not tourists",
-      "Try co-living before committing to a rental",
-    ],
-    unsure: [
-      "First 2–3 days: no agenda",
-      "One sunset gathering",
-      "One beach nobody told you about — ask a local",
-      "Eat where there's no English menu",
-    ],
-  };
-
-  const experiences = experienceMap[ctx.purpose ?? "unsure"] ?? experienceMap.unsure!;
-
-  const insightMap: Record<string, string> = {
-    wellness:      "Ecstatic Dance is the most misunderstood event here. No alcohol, no phones — nothing like what people expect.",
-    music:         "Full Moon is the island's most marketed and most overrated night. The real music happens on a Tuesday with 200 people who actually care.",
-    "remote-work": "Most people are less productive in the first two weeks. The ones who give it time often extend their stay by months.",
-    romance:       "Hinkong at low tide is one of those rare places that actually delivers what travel photos promise.",
-    community:     "Community here forms around recurrence, not events. Show up to the same class three times a week — that's the only strategy that works.",
-    nature:        "The best beaches aren't on any travel site. Ask a local who's been here longer than a season.",
-    moving:        "Year one is a honeymoon. Year two is when the real picture appears.",
-    unsure:        "A surprising number of people arrive not knowing what they need — and leave knowing exactly who they want to become.",
-  };
-
-  const localInsight = insightMap[ctx.purpose ?? "unsure"] ?? insightMap.unsure!;
-
-  return { lookingFor, avoid, stayArea, experiences, localInsight };
-}
-
-// ─── Mode detection ───────────────────────────────────────────────────────────
-//
-// DISCOVERY MODE — SIT is gathering context (purpose, duration, scooter, sociability).
-//   KB cards are NEVER injected here. The conversation is focused and intentional.
-//
-// LOCAL EXPERT MODE — user has asked a direct question (or brief is generated).
-//   KB cards are used ONLY when the relevance score clears the minimum threshold.
-//   If no card clears the bar, SIT gives an honest answer and redirects.
-
-/** Minimum relevance score a KB card must hit to appear in an expert response. */
-const EXPERT_SCORE_MIN = 5;
-
-/** Returns true if the message looks like a direct question the user expects answered. */
-function isDirectQuestion(text: string): boolean {
-  if (text.includes("?")) return true;
-  return /^(what|where|when|how|who|which|is there|are there|can i|do you|is it|tell me about|recommend|suggest|any |does |will |should |could |find me|show me)/i.test(text.trim());
-}
-
-// ─── Intent Classification ─────────────────────────────────────────────────────
-
-type QueryIntent = "location" | "event_live" | "definition" | "recommendation" | "planning" | "advice" | "general";
-
-/**
- * Classify the user's message into ONE intent bucket before generating a response.
- * Order matters — more specific checks run first.
- */
-function classifyIntent(text: string): QueryIntent {
-  if (isDefinitionQuestion(text)) return "definition";
-  if (isEventQuery(text)) return "event_live";
-
-  const t = text.toLowerCase();
-
-  // Location / directions — all patterns that signal the user wants to know WHERE something is or HOW TO GET there
-  if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|where can i find|directions? (to|from)|send .{0,20}(location|pin)|maps?|google maps|address|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
-    return "location";
-  }
-  // "location" anywhere in the message almost always means "give me the pin" in this context
-  if (/\blocation\b/.test(t)) {
-    return "location";
-  }
-  // Short bare follow-ups ("pin?", "maps?", "address?", "directions?", etc.)
-  if (/^(directions?|maps?|where|address|pin|how to get there|how do i get there|get there|navigate|navigation)\??$/.test(t.trim())) {
-    return "location";
-  }
-  // "drop a pin", "share the location", "can you send me the pin", etc.
-  if (/\b(drop (a |the )?pin|share .{0,10}(location|pin)|can you send .{0,20}(location|pin)|what'?s? the (address|pin))\b/.test(t)) {
-    return "location";
-  }
-
-  // Planning — "Build me a 7-day plan", "itinerary", "day by day"
-  if (/\b(itinerary|day.by.day|day \d|week plan|\d.day plan|build.*(plan|schedule)|create.*(plan|schedule)|write.*(plan|itinerary))\b/.test(t)) {
-    return "planning";
-  }
-
-  // Personal advice — "Is this right for me?", "Should I come?"
-  if (/\b(right for me|is it worth|would i (enjoy|like|fit)|for someone like|my situation|should i (come|go|try|visit)|do you think i should)\b/.test(t)) {
-    return "advice";
-  }
-
-  // Recommendation — "Best beach?", "Where should I stay?"
-  if (/\b(best|recommend|suggest|where should|good place|top|favourite|where can i find|find me)\b/.test(t)) {
-    return "recommendation";
-  }
-
-  return "general";
-}
-
-// ─── Location / Directions Handler ────────────────────────────────────────────
-
-// ─── Venue Database ────────────────────────────────────────────────────────────
-
-interface VenueData {
-  displayName: string;
-  area: string;
-  mapsUrl: string;
-  fromThongSala: string;
-  fromSrithanu: string;
-  insight: string;
-  walkNote?: string;
-}
-
-const VENUE_DB: Record<string, VenueData> = {
-  lighthouse: {
-    displayName: "Lighthouse",
-    area: "Haad Rin (south tip)",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Lighthouse+Bungalows+Koh+Phangan",
-    fromThongSala: "~30 min by scooter / 400–500 THB taxi",
-    fromSrithanu: "~30–35 min by scooter / 500 THB taxi",
-    insight: "Go before midnight — it fills fast on party nights.",
-    walkNote: "Final stretch from the road is a short walk down.",
-  },
-  "secret mountain": {
-    displayName: "Secret Mountain",
-    area: "Hills above Srithanu (west coast)",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Secret+Mountain+Bar+Koh+Phangan",
-    fromThongSala: "~15 min by scooter",
-    fromSrithanu: "5–10 min by scooter up the hill",
-    insight: "GPS is unreliable here. Follow the signs or ask locally.",
-    walkNote: "Scooter access only — steep road, not walkable.",
-  },
-  "haad rin": {
-    displayName: "Haad Rin",
-    area: "South tip of the island",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Haad+Rin+Beach+Koh+Phangan",
-    fromThongSala: "~30 min by scooter / songthaew 80–150 THB",
-    fromSrithanu: "~35 min by scooter",
-    insight: "Haad Rin and Srithanu feel like different islands. Decide which vibe you want before committing.",
-  },
-  srithanu: {
-    displayName: "Srithanu",
-    area: "West coast, 8 km north of Thong Sala",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Srithanu+Koh+Phangan",
-    fromThongSala: "~10 min by scooter / songthaew 80 THB",
-    fromSrithanu: "You're here",
-    insight: "The wellness, yoga, and coworking hub. Srithanu and Hinkong blend into each other.",
-  },
-  "hin kong": {
-    displayName: "Hin Kong (Hinkong)",
-    area: "West coast, just south of Srithanu",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Hin+Kong+Beach+Koh+Phangan",
-    fromThongSala: "~10 min by scooter",
-    fromSrithanu: "15 min walk along the beach / 5 min by scooter",
-    insight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
-  },
-  hinkong: {
-    displayName: "Hin Kong (Hinkong)",
-    area: "West coast, just south of Srithanu",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Hin+Kong+Beach+Koh+Phangan",
-    fromThongSala: "~10 min by scooter",
-    fromSrithanu: "15 min walk along the beach / 5 min by scooter",
-    insight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
-  },
-  "thong sala": {
-    displayName: "Thong Sala",
-    area: "Main town & ferry pier",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Koh+Phangan",
-    fromThongSala: "You're here",
-    fromSrithanu: "~10 min by scooter / songthaew 80 THB",
-    insight: "Best grocery stores, immigration office, and night market on the island.",
-  },
-  "eden club": {
-    displayName: "Eden Club",
-    area: "Haad Rin area",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Eden+Club+Koh+Phangan",
-    fromThongSala: "~30 min by scooter",
-    fromSrithanu: "~35 min by scooter",
-    insight: "Outdoor jungle setting. Smaller and more intimate than the main Haad Rin venues.",
-  },
-  "chaloklum": {
-    displayName: "Chaloklum",
-    area: "North coast",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Chaloklum+Koh+Phangan",
-    fromThongSala: "~25 min by scooter",
-    fromSrithanu: "~20 min by scooter",
-    insight: "Quieter fishing village feel. Boat trips to Koh Ma and Sail Rock depart from here.",
-  },
-  shivari: {
-    displayName: "Shivari",
-    area: "Srithanu",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Shivari+Koh+Phangan",
-    fromThongSala: "~12 min by scooter",
-    fromSrithanu: "5 min by scooter / 10 min walk",
-    insight: "Popular retreat and event venue. Usually has workshops and gatherings across the week.",
-  },
-  agama: {
-    displayName: "Agama Yoga",
-    area: "Srithanu",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Agama+Yoga+School+Koh+Phangan",
-    fromThongSala: "~12 min by scooter",
-    fromSrithanu: "5–10 min by scooter",
-    insight: "One of the most established yoga schools on the island. Month-long intensives fill up fast.",
-  },
-  "baan tai": {
-    displayName: "Baan Tai",
-    area: "South coast (between Thong Sala and Haad Rin)",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Baan+Tai+Koh+Phangan",
-    fromThongSala: "~10 min by scooter",
-    fromSrithanu: "~20 min by scooter",
-    insight: "The jungle party corridor. Many of the midweek electronic music events happen here.",
-  },
-  "haad yuan": {
-    displayName: "Haad Yuan",
-    area: "Southeast coast",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Haad+Yuan+Beach+Koh+Phangan",
-    fromThongSala: "~30 min by scooter + short walk / longtail from Haad Rin (~15 min)",
-    fromSrithanu: "~40 min by scooter",
-    insight: "One of the best swimming beaches. Quieter than the west coast, harder to reach — that's the point.",
-  },
-};
-
-/** Known venue name aliases for scanning SIT's own responses. */
-const KNOWN_VENUE_KEYS: string[] = Object.keys(VENUE_DB).sort((a, b) => b.length - a.length); // longest first
-
-/** Scan text for a known venue name and return the canonical key. */
-function extractVenueFromText(text: string): string | undefined {
-  const lower = text.toLowerCase();
-  return KNOWN_VENUE_KEYS.find(key => lower.includes(key));
-}
-
-/** Format a VenueData record into the structured map-pin card format. */
-function formatVenueCard(venue: VenueData): string {
-  const transportLines = [`• From Thong Sala: ${venue.fromThongSala}`];
-  if (venue.fromSrithanu !== "You're here") {
-    transportLines.push(`• From Srithanu: ${venue.fromSrithanu}`);
-  }
-  if (venue.walkNote) {
-    transportLines.push(`• Note: ${venue.walkNote}`);
-  }
-
-  return [
-    `📍 ${venue.displayName}`,
-    ``,
-    `Area:`,
-    venue.area,
-    ``,
-    `Google Maps:`,
-    venue.mapsUrl,
-    ``,
-    `How to get there:`,
-    ...transportLines,
-    ``,
-    `Local Insight:`,
-    venue.insight,
-  ].join("\n");
-}
-
-/**
- * Answer a location or directions question.
- * Uses the venue database directly — KB content cards are NOT used for directions.
- */
-function buildLocationAnswer(question: string): string {
-  const q = question.toLowerCase();
-
-  // Match against venue database (longest key first prevents partial matches)
-  for (const key of KNOWN_VENUE_KEYS) {
-    if (q.includes(key)) {
-      return formatVenueCard(VENUE_DB[key]!);
-    }
-  }
-
-  // Airport / arrival — these are genuinely infrastructure questions, keep the map pin
-  if (/airport|fly|flight/.test(q)) {
-    return [
-      "📍 Thong Sala Pier (main arrival point)",
-      "",
-      "Area:",
-      "Thong Sala — main town",
-      "",
-      "Google Maps:",
-      "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Pier+Koh+Phangan",
-      "",
-      "How to get there:",
-      "• Fly to Koh Samui (USM), then take the Lomprayah ferry — 30 min",
-      "• Bangkok → Samui: ~1 hour, several flights daily",
-      "• Budget route: Surat Thani + night ferry (~4 hours, cheaper)",
-      "",
-      "Local Insight:",
-      "Book Lomprayah online — it sells out around Full Moon week.",
-    ].join("\n");
-  }
-  if (/ferry|boat|from samui|from koh tao|from surat/.test(q)) {
-    return [
-      "📍 Thong Sala Pier",
-      "",
-      "Area:",
-      "Main town",
-      "",
-      "Google Maps:",
-      "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Pier+Koh+Phangan",
-      "",
-      "How to get there:",
-      "• From Koh Samui: 30–45 min (Lomprayah or Seatran)",
-      "• From Koh Tao: 1.5–2 hours",
-      "• From Surat Thani: 3–4 hours (night ferry available)",
-      "",
-      "Local Insight:",
-      "Book Lomprayah online. Seatran is walk-on but slower.",
-    ].join("\n");
-  }
-
-  // No venue known — ask which place rather than dumping generic transport info
-  return "Which place do you want the pin for?";
-}
-
-/** Clips raw KB prose to at most N sentences so it never becomes an essay. */
-function firstSentences(text: string, n: number): string {
-  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
-  return sentences.slice(0, n).join(" ").trim();
-}
-
-/**
- * Returns true if a KB card clearly belongs to a conflicting purpose category.
- * Used to prevent wellness cards surfacing for music users, etc.
- */
-function isOffPurposeCard(card: KBCard, purpose: string): boolean {
-  const cat = card.category.toLowerCase();
-  const topic = card.topic.toLowerCase();
-  if (purpose === "music") {
-    return /yoga|ecstatic.?dance|meditation|breathwork|cacao|tantra|plant.?medicine|ceremony|sound.?healing|retreat|spiritual/.test(cat + " " + topic);
-  }
-  if (purpose === "wellness") {
-    return /party.?intelligence|music.?intelligence|full.?moon|nightlife/.test(cat);
-  }
-  return false;
-}
-
-/**
- * Tries to build a direct, KB-backed answer to the user's question.
- * Format: short answer → bullet points if available → one-line local insight.
- * Returns null if no card clears the relevance threshold.
- */
-function buildExpertAnswer(
-  question: string,
-  hits: { card: KBCard; score: number }[],
-  purpose?: string
-): string | null {
-  const q = question.toLowerCase();
-  // Filter out cards that clearly contradict the user's purpose
-  const purposeFiltered = purpose
-    ? hits.filter(h => !isOffPurposeCard(h.card, purpose))
-    : hits;
-  const strong = purposeFiltered.filter(h => h.score >= EXPERT_SCORE_MIN);
-
-  // ── Real-time questions we genuinely can't answer ─────────────────────────
-  if (/tonight|today|this week|what.?s on|happening now|event|schedule|lineup|right now/.test(q)) {
-    const eventCard = strong.find(h =>
-      /music|party|event|dance|dj|techno|house/.test(h.card.category.toLowerCase())
-    );
-    const insight = eventCard ? firstSentences(eventCard.card.localInsight || eventCard.card.description, 2) : null;
-    if (insight && insight.length > 20) {
-      return `No live event feed — I can't tell you what's on tonight.\n\n${insight}\n\nLocal insight:\nThe best nights are rarely the biggest ones — follow the artists, not the venues.`;
-    }
-    return null;
-  }
-
-  if (strong.length === 0) return null;
-
-  // ── Card relevance guard ───────────────────────────────────────────────────
-  // Ensure the top card is actually about what the user asked.
-  // Extract meaningful words from the question and check they appear in the card.
-  const questionKeywords = q
-    .replace(/\b(what|where|when|how|who|which|is|it|the|a|an|are|was|were|do|does|can|i|you|me|my|your|in|on|at|of|to|for|and|or|but|with|from|that|this|they|them|their|about|tell|know|any|best|good)\b/g, " ")
-    .split(/\W+/)
-    .filter(w => w.length > 3);
-
-  // Find the first card whose topic or content contains at least one key word from the question
-  const relevantCard = strong.find(h => {
-    if (questionKeywords.length === 0) return true; // no keywords to check — pass through
-    const cardText = (h.card.topic + " " + h.card.description + " " + h.card.localInsight + " " + (h.card.localSecret ?? "")).toLowerCase();
-    return questionKeywords.some(kw => cardText.includes(kw));
-  });
-
-  if (!relevantCard) return null;
-
-  const top = relevantCard.card;
-
-  // Build bullet points from bestFor field if it has structured data
-  const bullets = top.bestFor
-    ? top.bestFor.split(/[,;]/).map(s => s.trim()).filter(s => s.length > 2).slice(0, 4)
-    : [];
-
-  const mainAnswer = firstSentences(top.localInsight || top.description, 2);
-  if (!mainAnswer || mainAnswer.length < 20) return null;
-
-  const insightLine = top.localSecret
-    ? firstSentences(top.localSecret, 1)
-    : firstSentences(top.localInsight || top.description, 1);
-
-  if (bullets.length >= 2) {
-    return `${top.topic}:\n${bullets.map(b => `• ${b}`).join("\n")}\n\nLocal insight:\n${insightLine}`;
-  }
-
-  return `${mainAnswer}\n\nLocal insight:\n${insightLine}`;
-}
-
-/**
- * Honest fallback when KB has no high-relevance answer.
- * Short, direct, always ends with a redirect or question.
- */
-function buildHonestFallback(question: string): string {
-  const q = question.toLowerCase();
-
-  if (/tonight|today|what.?s on|happening|event|schedule|lineup/.test(q)) {
-    return "No live event feed — I can't tell you what's on right now.\n\nTell me what you're after:\n• Electronic / techno / house\n• Live band music\n• Sunset social gathering\n• Quieter bar scene\n\nI'll point you to the right type of venue.";
-  }
-  if (/cost|price|how much|expensive|cheap|budget/.test(q)) {
-    return "Rough daily costs:\n• Budget: $30–50\n• Mid-range: $60–100\n• Comfortable: $100–150+\n\nLocal insight:\nAccommodation near the main areas is 30% cheaper if you book direct.";
-  }
-  if (/safe|dangerous|crime|scam/.test(q)) {
-    return "Generally safe. Main risks:\n• Scooter accidents\n• Petty theft at Full Moon\n• Dodgy ceremony facilitators\n\nAnything specific you're worried about?";
-  }
-  if (/weather|rain|season|monsoon|best time/.test(q)) {
-    return "Best months:\n• Feb – Aug: dry, sunny\n• Sep – Oct: occasional rain\n• Nov – Dec: rough — heavy rain, choppy seas\n\nWhen are you planning to come?";
-  }
-  if (/visa|stay|how long|legal/.test(q)) {
-    return "Visa basics:\n• 30 days on arrival (most passports)\n• +30 day extension at Thong Sala immigration\n• Longer stays need a proper Thai visa\n\nWhat's your nationality?";
-  }
-  if (/sim|internet|wifi|data/.test(q)) {
-    return "Connectivity:\n• AIS or DTAC — both solid coverage\n• Monthly SIM with unlimited data: ~$15–20\n• Most coworking spaces and cafés have reliable wifi\n\nAre you planning to work remotely?";
-  }
-  if (/food|eat|restaurant|cafe|coffee/.test(q)) {
-    return "Food breakdown:\n• Street food: $2–5 per meal\n• Local restaurants: $5–10\n• Western / health cafés: $8–15\n\nLocal insight:\nThe best spots rarely have English menus out front.";
-  }
-  return "I don't have a specific answer for that. Tell me more and I'll give you what I do know.";
+interface DeveloperTurn {
+  id: string;
+  label: string;
+  payload: DeveloperConsolePayload;
 }
 
 // ─── Brief Card ───────────────────────────────────────────────────────────────
@@ -879,45 +93,167 @@ function BriefCard({ brief }: { brief: SITBrief }) {
   );
 }
 
-// ─── Chat Screen ──────────────────────────────────────────────────────────────
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="max-h-44 overflow-auto rounded-md border border-white/[0.08] bg-black/30 p-2 text-[10px] leading-relaxed text-white/55">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
 
-const INITIAL_CTX: UserContext = {
-  purposeFollowUpAsked: false,
-  durationAsked: false,
-  scooterAsked: false,
-  sociabilityAsked: false,
-  exchangeCount: 0,
-  briefGenerated: false,
-};
+function DeveloperConsole({
+  turns,
+  selectedId,
+  onSelect,
+  onExport,
+}: {
+  turns: DeveloperTurn[];
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  onExport: () => void;
+}) {
+  const selected = turns.find(turn => turn.id === selectedId) ?? turns.at(-1);
+  if (!selected) return null;
+  const payload = selected.payload;
+
+  return (
+    <section className="flex-none max-h-[42dvh] overflow-y-auto border-t border-amber-400/20 bg-black/45 px-3 py-3 text-white">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Bug className="h-3.5 w-3.5 text-amber-300" />
+          <span className="text-[11px] font-bold uppercase tracking-widest text-amber-200">Developer Console</span>
+        </div>
+        <button
+          onClick={onExport}
+          className="flex items-center gap-1 rounded-md border border-white/[0.1] px-2 py-1 text-[10px] text-white/60 hover:border-amber-300/40 hover:text-amber-100"
+        >
+          <Download className="h-3 w-3" />
+          JSON
+        </button>
+      </div>
+
+      <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+        {turns.map((turn, index) => (
+          <button
+            key={turn.id}
+            onClick={() => onSelect(turn.id)}
+            className={`rounded-md border px-2 py-1 text-[10px] transition ${
+              selected.id === turn.id
+                ? "border-amber-300/50 bg-amber-300/10 text-amber-100"
+                : "border-white/[0.08] text-white/45 hover:text-white/70"
+            }`}
+          >
+            {index + 1}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-3 text-[11px]">
+        <div className="rounded-md border border-white/[0.08] p-2">
+          <div className="mb-1 text-white/35">User Message</div>
+          <div className="text-white/75">{payload.userMessage || "(boot)"}</div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-md border border-white/[0.08] p-2">
+            <div className="mb-1 text-white/35">Detected Intent</div>
+            <div className="text-white/80">{payload.detectedIntent.intent}</div>
+            <div className="text-white/35">confidence {payload.detectedIntent.confidence}</div>
+          </div>
+          <div className="rounded-md border border-white/[0.08] p-2">
+            <div className="mb-1 text-white/35">Decision Trace</div>
+            <div className="text-white/65">{payload.decisionTrace.join(" -> ")}</div>
+          </div>
+        </div>
+
+        <details open className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">Conversation Memory</summary>
+          <JsonBlock value={payload.memory} />
+        </details>
+
+        <details open className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">Time Intelligence</summary>
+          <JsonBlock value={payload.timeTrace} />
+        </details>
+
+        <details open className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">Services Called</summary>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {payload.services.map(service => (
+              <div key={service.service} className="rounded border border-white/[0.06] p-2">
+                <div className="text-white/70">{service.service}</div>
+                <div className="text-white/35">
+                  {service.called ? "called" : "skipped"} · {service.durationMs}ms · {service.status}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">Knowledge Retrieval</summary>
+          <div className="mt-2 text-white/35">
+            version {payload.knowledgeRetrieval.version ?? "none"} · imported {payload.knowledgeRetrieval.importedAt ?? "none"}
+          </div>
+          <div className="mt-2 grid gap-2">
+            <JsonBlock value={{
+              retrievedCards: payload.knowledgeRetrieval.retrievedCards,
+              cardsUsed: payload.knowledgeRetrieval.cardsUsed,
+              cardsRejected: payload.knowledgeRetrieval.cardsRejected,
+            }} />
+          </div>
+        </details>
+
+        <details className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">Prompt Inspector</summary>
+          <JsonBlock value={payload.promptInspector} />
+        </details>
+
+        <details className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">LLM Response</summary>
+          <JsonBlock value={payload.llmResponse} />
+        </details>
+
+        <details className="rounded-md border border-white/[0.08] p-2">
+          <summary className="cursor-pointer text-white/55">Timeline State</summary>
+          <JsonBlock value={payload.timelineTurn} />
+        </details>
+      </div>
+    </section>
+  );
+}
+
+// ─── Chat Screen ──────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
   const [, setLocation] = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [context, setContext] = useState<UserContext>(INITIAL_CTX);
+  const [sessionId, setSessionId] = useState<string>("");
   const [isTyping, setIsTyping] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [showPlans, setShowPlans] = useState(false);
+  const [planOptions, setPlanOptions] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [locked, setLocked] = useState(true);
+  const isDevBuild = import.meta.env.DEV;
+  const [developerMode, setDeveloperMode] = useState(() => import.meta.env.DEV && localStorage.getItem("sit.developerMode") === "true");
+  const [developerTurns, setDeveloperTurns] = useState<DeveloperTurn[]>([]);
+  const [selectedDeveloperTurnId, setSelectedDeveloperTurnId] = useState<string | undefined>();
 
   // Knowledge base
-  const [knowledgeBase, setKnowledgeBase] = useState<KBCard[]>(EMBEDDED_KB);
-  const [kbStatus, setKbStatus] = useState<"embedded" | "uploaded" | "loading">("embedded");
+  const [kbCardCount, setKbCardCount] = useState(0);
+  const [kbStatus, setKbStatus] = useState<"server" | "uploaded" | "loading">("server");
   const [kbBannerVisible, setKbBannerVisible] = useState(false);
 
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Conversation memory — persists across renders without causing re-renders
-  const conversationMemory = useRef<{
-    lastVenue?: string;   // last venue / place name mentioned
-    lastTopic?: string;   // last broad topic (events, beaches, food, etc.)
-  }>({});
+  const userKeyRef = useRef<string>(
+    localStorage.getItem("sit.webUserKey") ?? `web-${Math.random().toString(36).slice(2)}`,
+  );
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping, showPlans]);
+  }, [messages, isTyping, planOptions]);
 
   const addMsg = (msg: Omit<TextMessage, "id" | "timestamp"> | Omit<BriefMessage, "id" | "timestamp">) => {
     setMessages(prev => [
@@ -933,24 +269,100 @@ export default function ChatScreen() {
     addMsg({ type: "text", sender: "sit", text });
   };
 
-  /**
-   * Like sitSay, but also scans SIT's response text for known venue names and
-   * stores the first match in conversationMemory so follow-ups like "location?"
-   * or "where is it?" can resolve without the user repeating the venue name.
-   */
-  const sitSayWithMemory = async (text: string, typingMs = 1100) => {
-    await sitSay(text, typingMs);
-    const venue = extractVenueFromText(text);
-    if (venue) conversationMemory.current.lastVenue = venue;
+  const renderRunnerMessages = async (runnerMessages: AssistantMessage[], brief?: SITBrief) => {
+    if (brief && runnerMessages.length >= 2) {
+      await sitSay(runnerMessages[0]!.text, 1400);
+      setIsTyping(true);
+      await new Promise(r => setTimeout(r, 2200));
+      setIsTyping(false);
+      addMsg({ type: "brief", sender: "sit", brief });
+      await sitSay(runnerMessages[1]!.text, 1300);
+      for (const message of runnerMessages.slice(2)) {
+        await sitSay(message.text, 1100);
+      }
+      return;
+    }
+
+    for (const message of runnerMessages) {
+      await sitSay(message.text, 1100);
+    }
+  };
+
+  const renderSessionTranscript = (state?: ConversationState) => {
+    const turns = state?.turns ?? [];
+    if (!turns.length) return false;
+
+    setMessages(turns
+      .filter(turn => turn.text.trim())
+      .map(turn => ({
+        id: Math.random().toString(36).slice(2),
+        type: "text" as const,
+        sender: turn.role === "assistant" ? "sit" : "user",
+        text: turn.text,
+        timestamp: new Date(turn.timestamp ?? Date.now()),
+      })));
+    return true;
+  };
+
+  const recordDeveloperTurn = (payload?: DeveloperConsolePayload) => {
+    if (!payload || !isDevBuild || !developerMode) return;
+    const id = Math.random().toString(36).slice(2);
+    setDeveloperTurns(prev => [
+      ...prev,
+      {
+        id,
+        label: payload.userMessage || "boot",
+        payload,
+      },
+    ]);
+    setSelectedDeveloperTurnId(id);
+  };
+
+  const toggleDeveloperMode = () => {
+    if (!isDevBuild) return;
+    setDeveloperMode(prev => {
+      const next = !prev;
+      localStorage.setItem("sit.developerMode", String(next));
+      return next;
+    });
+  };
+
+  const exportDeveloperConversation = () => {
+    const data = JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      sessionId,
+      turns: developerTurns,
+    }, null, 2);
+    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `sit-developer-console-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // Boot sequence
   useEffect(() => {
     const boot = async () => {
-      await sitSay("Hey. I'm SIT — local intelligence for Koh Phangan.", 900);
-      await sitSay("Before I recommend anything, I need to understand you.", 700);
-      await sitSay("What's bringing you to the island?", 900);
-      setSuggestions(["Wellness", "Music & parties", "Remote work", "Romance", "Community", "Nature", "Moving here", "Not sure yet"]);
+      localStorage.setItem("sit.webUserKey", userKeyRef.current);
+      const session = await createOrLoadWebSession(userKeyRef.current);
+      setSessionId(session.id);
+      const version = await getKnowledgeVersion().catch(() => undefined);
+      setKbCardCount(version?.metadata?.cardCount ?? 0);
+      if (renderSessionTranscript(session.state)) {
+        setLocked(false);
+        inputRef.current?.focus();
+        return;
+      }
+      const output = await sendConversationTurn({
+        sessionId: session.id,
+        userKey: userKeyRef.current,
+        message: "",
+        devTrace: developerMode,
+      });
+      recordDeveloperTurn(output.developerConsole);
+      await renderRunnerMessages(output.messages);
+      setSuggestions(output.suggestions ?? []);
       setLocked(false);
       inputRef.current?.focus();
     };
@@ -967,14 +379,13 @@ export default function ChatScreen() {
 
     setKbStatus("loading");
     try {
-      const cards = await parseXlsxToCards(file);
-      if (cards.length === 0) throw new Error("No cards found");
-      setKnowledgeBase(cards);
+      const metadata = await importKnowledgeFile(file);
+      setKbCardCount(metadata.cardCount);
       setKbStatus("uploaded");
       setKbBannerVisible(true);
       setTimeout(() => setKbBannerVisible(false), 4000);
     } catch {
-      setKbStatus("embedded");
+      setKbStatus("server");
       setKbBannerVisible(false);
     }
   };
@@ -987,172 +398,22 @@ export default function ChatScreen() {
 
     setInputValue("");
     setSuggestions([]);
+    setPlanOptions([]);
     setLocked(true);
 
     addMsg({ type: "text", sender: "user", text: trimmed });
 
-    // ── MEMORY-FIRST HARD BLOCK ───────────────────────────────────────────────
-    // If the last venue is known and the user is signalling a location request,
-    // return the pin immediately — never touch the KB or run classification.
-    const MEM_LOCATION_RE = /\b(location|map|pin|address|directions?|google maps|where is it|how (do i |to )?get there|send (me )?.{0,20}(location|pin))\b/i;
-    {
-      const venueRefEarly = extractVenueFromText(trimmed);
-      const lastVenueMemory = conversationMemory.current.lastVenue;
-      // Hard block: lastVenue known + user asking location with NO venue name in the message
-      // (if they named a venue, the normal location handler will pick it up via classifyIntent)
-      if (lastVenueMemory && !venueRefEarly && MEM_LOCATION_RE.test(trimmed)) {
-        const answer = buildLocationAnswer(`where is ${lastVenueMemory}`);
-        await sitSay(answer, 1200);
-        setLocked(false);
-        inputRef.current?.focus();
-        return;
-      }
-    }
-
-    const isQuestion = isDirectQuestion(trimmed);
-    const isPostBrief = context.briefGenerated;
-    const intent = classifyIntent(trimmed);
-
-    // ── LOCATION / DIRECTIONS — fires at any point ────────────────────────────
-    if (intent === "location") {
-      // We're already inside the location handler — the user wants a pin.
-      // Check the message text first; fall back to whatever venue SIT last mentioned.
-      const venueInMessage = extractVenueFromText(trimmed);
-      const resolvedVenue = venueInMessage ?? conversationMemory.current.lastVenue;
-      const queryForLocation = resolvedVenue ? `where is ${resolvedVenue}` : trimmed;
-
-      const answer = buildLocationAnswer(queryForLocation);
-      await sitSay(answer, 1200);
-      // Update memory with whatever venue we just answered about
-      if (resolvedVenue) conversationMemory.current.lastVenue = resolvedVenue;
-
-      setLocked(false);
-      inputRef.current?.focus();
-      return;
-    }
-
-    // ── EVENT QUERY — fires at any point in the conversation ─────────────────
-    if (intent === "event_live") {
-      await sitSay("Let me check what's on...", 600);
-      const { response, fallback } = await searchEvents(trimmed);
-      if (fallback || !response) {
-        await sitSayWithMemory(buildEventFallback(), 1200);
-      } else {
-        const insight = getEventInsight(context.purpose);
-        await sitSayWithMemory(`${response}\n\nLocal Insight:\n${insight}`, 1200);
-      }
-      conversationMemory.current.lastTopic = "events";
-      setLocked(false);
-      inputRef.current?.focus();
-      return;
-    }
-
-    // ── POST-BRIEF: LOCAL EXPERT MODE ────────────────────────────────────────
-    // Brief has been shown — user is now asking follow-up questions or exploring.
-    // Answer directly from KB when relevant. Never inject unrelated cards.
-    if (isPostBrief) {
-      // Detect "yes I want a plan" — only if plans haven't been shown yet
-      const wantsPlan = !showPlans && /\b(plan|itinerary|schedule|day.by.day|show me (a |the )?plan|put together (a )?plan|yes (please|i (would|want))|yes.*(plan|itinerary)|i('d| would) (love|like) (a |that )?plan)\b/i.test(trimmed);
-      if (wantsPlan) {
-        await sitSay("Here are a few options:", 800);
-        setShowPlans(true);
-        setLocked(false);
-        inputRef.current?.focus();
-        return;
-      }
-
-      // Topic-signal keywords — any of these mean the user wants an answer, not an ack
-      const TOPIC_RE = /\b(yoga|class|classes|studio|workshop|retreat|meditation|teacher|event|party|parties|tonight|today|tomorrow|this week|next week|beach|restaurant|café|cafe|food|eat|drink|bar|nightlife|accommodation|stay|hotel|hostel|villa|wellness|massage|spa|transport|scooter|taxi|ferry|location|map|pin|address|price|cost|ticket|website|instagram|music|concert|dj|market|hike|waterfall|snorkel|dive|surf|swim|cowork|internet|wifi|sim|atm|bank|hospital|clinic|visa|immigration)\b/i;
-      const isTopicQuestion = isQuestion || TOPIC_RE.test(trimmed);
-
-      if (isTopicQuestion) {
-        const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
-        const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
-        if (expertAnswer) {
-          await sitSayWithMemory(expertAnswer, 1200);
-        } else {
-          await sitSayWithMemory(buildHonestFallback(trimmed), 1100);
-        }
-      } else {
-        // Genuinely conversational — brief acknowledgment, keep door open
-        const acks = [
-          "Makes sense. What else is on your radar?",
-          "Worth keeping in mind. Anything specific you want me to look into?",
-          "Fair enough. What else would be useful to know?",
-          "Noted. Is there anything about the island you're unsure about?",
-        ];
-        await sitSay(acks[context.exchangeCount % acks.length], 1000);
-        setContext(prev => ({ ...prev, exchangeCount: prev.exchangeCount + 1 }));
-      }
-      setLocked(false);
-      inputRef.current?.focus();
-      return;
-    }
-
-    // ── DISCOVERY MODE ────────────────────────────────────────────────────────
-    // SIT is gathering context (purpose, duration, scooter, sociability).
-    // Run the state machine. KB cards are NEVER injected into discovery responses —
-    // the conversation is focused on understanding the user, not demonstrating knowledge.
-
-    const response = processMessage(trimmed, context);
-    setContext(response.updatedContext);
-
-    if (response.briefReady) {
-      // ── Brief generation ───────────────────────────────────────────────────
-      await sitSay(response.message, 1400);
-      setIsTyping(true);
-      await new Promise(r => setTimeout(r, 2200));
-      setIsTyping(false);
-      addMsg({ type: "brief", sender: "sit", brief: buildBrief(response.updatedContext) });
-      await sitSay("Want me to put together a plan for your stay?", 1300);
-      setLocked(false);
-      return;
-    }
-
-    if (isQuestion) {
-      // ── Question mid-discovery: answer and stop — never append onboarding ─────
-      // The question is the priority. Discovery context is extracted from what the
-      // user writes; we never interrupt an answer with a profiling question.
-      const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
-      const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
-      if (expertAnswer) {
-        await sitSayWithMemory(expertAnswer, 1200);
-      } else {
-        await sitSayWithMemory(buildHonestFallback(trimmed), 1000);
-      }
-      // No discovery follow-up — ever. Golden rule: answer completely, then stop.
-    } else {
-      // ── Pure discovery: non-question message ─────────────────────────────────
-      // If message references a known venue or contains a hard direct signal,
-      // answer from KB instead of advancing onboarding.
-      const HARD_DIRECT_RE = /\b(location|map|pin|directions?|how much|price|ticket|opening.?hours|address|website|instagram|event|tonight|today|party|parties|google.?maps|where is|send|available|what time|when does|show me|find me|is there|are there)\b/i;
-      const venueRef = extractVenueFromText(trimmed);
-      const hasDirectSignal = HARD_DIRECT_RE.test(trimmed);
-
-      if (venueRef || hasDirectSignal) {
-        // Treat as an implicit question — lookup KB and answer directly, no onboarding follow-up
-        const hits = searchKBWithScore(trimmed, context.purpose, knowledgeBase, 5);
-        const expertAnswer = buildExpertAnswer(trimmed, hits, context.purpose);
-        if (expertAnswer) {
-          await sitSayWithMemory(expertAnswer, 1200);
-        } else {
-          // If KB has nothing, give the venue pin if we have a venue ref
-          if (venueRef) {
-            const answer = buildLocationAnswer(`where is ${venueRef}`);
-            await sitSay(answer, 1200);
-            conversationMemory.current.lastVenue = venueRef;
-          } else {
-            await sitSayWithMemory(buildHonestFallback(trimmed), 1000);
-          }
-        }
-      } else {
-        // Genuinely conversational — advance the discovery state machine
-        await sitSay(response.message, 1100);
-        if (!response.updatedContext.purpose && response.suggestions?.length) {
-          setSuggestions(response.suggestions);
-        }
-      }
-    }
+    const output = await sendConversationTurn({
+      sessionId,
+      userKey: userKeyRef.current,
+      message: trimmed,
+      devTrace: developerMode,
+    });
+    setSessionId(output.session.id);
+    recordDeveloperTurn(output.developerConsole);
+    await renderRunnerMessages(output.messages, output.brief);
+    setSuggestions(output.suggestions ?? []);
+    setPlanOptions(output.planOptions ?? []);
 
     setLocked(false);
     inputRef.current?.focus();
@@ -1164,8 +425,6 @@ export default function ChatScreen() {
       handleSend(inputValue);
     }
   };
-
-  const kbCardCount = knowledgeBase.length;
 
   return (
     <div className="min-h-[100dvh] w-full flex justify-center bg-[hsl(240,12%,3%)] relative overflow-hidden">
@@ -1198,7 +457,7 @@ export default function ChatScreen() {
             <button
               data-testid="button-kb-status"
               onClick={() => fileInputRef.current?.click()}
-              title={`Knowledge base: ${kbCardCount} cards${kbStatus === "uploaded" ? " (custom)" : " (embedded)"} — click to upload`}
+              title={`Knowledge base: ${kbCardCount} cards${kbStatus === "uploaded" ? " (custom)" : " (server)"} — click to upload`}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-white/[0.08] hover:border-primary/30 hover:bg-primary/10 transition-all group"
             >
               <Database className="w-3 h-3 text-white/30 group-hover:text-primary/60 transition-colors" />
@@ -1221,6 +480,21 @@ export default function ChatScreen() {
             >
               <Upload className="w-3.5 h-3.5 text-white/30 hover:text-primary/60" />
             </button>
+
+            {isDevBuild && (
+              <button
+                data-testid="button-developer-mode"
+                onClick={toggleDeveloperMode}
+                title="Developer Mode"
+                className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all ${
+                  developerMode
+                    ? "border-amber-300/50 bg-amber-300/10"
+                    : "border-white/[0.08] hover:border-amber-300/30 hover:bg-amber-300/10"
+                }`}
+              >
+                <Bug className={`w-3.5 h-3.5 ${developerMode ? "text-amber-200" : "text-white/30"}`} />
+              </button>
+            )}
           </div>
         </header>
 
@@ -1323,14 +597,14 @@ export default function ChatScreen() {
           </AnimatePresence>
 
           {/* Plan buttons */}
-          {showPlans && (
+          {planOptions.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.25, duration: 0.4 }}
               className="flex flex-col gap-2 self-start w-[92%] mt-1"
             >
-              {["3-Day Plan", "7-Day Plan", "1-Month Plan"].map(plan => (
+              {planOptions.map(plan => (
                 <button
                   key={plan}
                   data-testid={`plan-${plan}`}
@@ -1347,6 +621,15 @@ export default function ChatScreen() {
 
           <div ref={endRef} />
         </div>
+
+        {isDevBuild && developerMode && developerTurns.length > 0 && (
+          <DeveloperConsole
+            turns={developerTurns}
+            selectedId={selectedDeveloperTurnId}
+            onSelect={setSelectedDeveloperTurnId}
+            onExport={exportDeveloperConversation}
+          />
+        )}
 
         {/* Input area */}
         <div

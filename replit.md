@@ -22,7 +22,10 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `attached_assets/SIT_V10_Knowledge_Graph_Adapted.xlsx` — canonical SIT master data workbook.
+- `artifacts/sit-demo/src/lib/kb-data.ts` — embedded frontend knowledge base generated from the SIT master data workbook.
+- `artifacts/sit-demo/src/lib/knowledge-base.ts` — KB search, insight extraction, and uploaded workbook parsing logic.
+- `artifacts/sit-demo/src/pages/chat.tsx` — main SIT demo chat experience.
 
 ## Architecture decisions
 
@@ -30,11 +33,12 @@ _Populate as you build — non-obvious choices a reader couldn't infer from the 
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Live Koh Phangan event answers should prioritize `phangan.events` plus trusted local Instagram sources:
+  `@phangan.events`, `@retromountainphangan`, `@_happy_people_events_`, `@phanganism`, `@bambuhuts`, `@edengarden_kohphangan`, `@holice___`, and `@secret.mountain.phangan`.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Use the SIT master data workbook as the authoritative knowledge/data source when continuing the project.
 
 ## Gotchas
 

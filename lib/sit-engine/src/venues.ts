@@ -1,0 +1,277 @@
+export interface VenueData {
+  id: string;
+  name: string;
+  aliases: string[];
+  area: string;
+  nearbyLandmark?: string;
+  googleMapsUrl: string;
+  transportNotes: {
+    fromThongSala: string;
+    fromSrithanu: string;
+    walkNote?: string;
+  };
+  localInsight: string;
+}
+
+const VENUES: VenueData[] = [
+  {
+    id: "ethos-cafe",
+    name: "ETHOS Wholefood Cafe & Shala",
+    aliases: ["ethos cafe", "ethos café", "ethos shala", "ethos wholefood cafe", "ethos"],
+    area: "Central Srithanu",
+    nearbyLandmark: "In the heart of Srithanu, close to the village's cafe and yoga cluster.",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=ETHOS+Wholefood+Cafe+and+Shala+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~12 min by scooter or taxi",
+      fromSrithanu: "A few minutes from central Srithanu; walkable from much of the village",
+      walkNote: "The cafe is set back from the main traffic rather than directly on the busy road.",
+    },
+    localInsight: "It is both a wholefood cafe and an active yoga shala, so check the current class schedule if that is why you're going.",
+  },
+  {
+    id: "lighthouse",
+    name: "Lighthouse",
+    aliases: ["lighthouse"],
+    area: "Haad Rin (south tip)",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Lighthouse+Bungalows+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~30 min by scooter / 400–500 THB taxi",
+      fromSrithanu: "~30–35 min by scooter / 500 THB taxi",
+      walkNote: "Final stretch from the road is a short walk down.",
+    },
+    localInsight: "Go before midnight — it fills fast on party nights.",
+  },
+  {
+    id: "secret-mountain",
+    name: "Secret Mountain",
+    aliases: ["secret mountain"],
+    area: "Hills above Srithanu (west coast)",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Secret+Mountain+Bar+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~15 min by scooter",
+      fromSrithanu: "5–10 min by scooter up the hill",
+      walkNote: "Scooter access only — steep road, not walkable.",
+    },
+    localInsight: "GPS is unreliable here. Follow the signs or ask locally.",
+  },
+  {
+    id: "haad-rin",
+    name: "Haad Rin",
+    aliases: ["haad rin"],
+    area: "South tip of the island",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Haad+Rin+Beach+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~30 min by scooter / songthaew 80–150 THB",
+      fromSrithanu: "~35 min by scooter",
+    },
+    localInsight: "Haad Rin and Srithanu feel like different islands. Decide which vibe you want before committing.",
+  },
+  {
+    id: "srithanu",
+    name: "Srithanu",
+    aliases: ["srithanu"],
+    area: "West coast, 8 km north of Thong Sala",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Srithanu+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~10 min by scooter / songthaew 80 THB",
+      fromSrithanu: "You're here",
+    },
+    localInsight: "The wellness, yoga, and coworking hub. Srithanu and Hinkong blend into each other.",
+  },
+  {
+    id: "hinkong",
+    name: "Hin Kong (Hinkong)",
+    aliases: ["hin kong", "hinkong"],
+    area: "West coast, just south of Srithanu",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Hin+Kong+Beach+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~10 min by scooter",
+      fromSrithanu: "15 min walk along the beach / 5 min by scooter",
+    },
+    localInsight: "Low-tide sunsets here are genuinely world-class. Less crowded than Srithanu.",
+  },
+  {
+    id: "thong-sala",
+    name: "Thong Sala",
+    aliases: ["thong sala"],
+    area: "Main town & ferry pier",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "You're here",
+      fromSrithanu: "~10 min by scooter / songthaew 80 THB",
+    },
+    localInsight: "Best grocery stores, immigration office, and night market on the island.",
+  },
+  {
+    id: "eden-club",
+    name: "Eden Club",
+    aliases: ["eden club"],
+    area: "Haad Rin area",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Eden+Club+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~30 min by scooter",
+      fromSrithanu: "~35 min by scooter",
+    },
+    localInsight: "Outdoor jungle setting. Smaller and more intimate than the main Haad Rin venues.",
+  },
+  {
+    id: "chaloklum",
+    name: "Chaloklum",
+    aliases: ["chaloklum"],
+    area: "North coast",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Chaloklum+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~25 min by scooter",
+      fromSrithanu: "~20 min by scooter",
+    },
+    localInsight: "Quieter fishing village feel. Boat trips to Koh Ma and Sail Rock depart from here.",
+  },
+  {
+    id: "shivari",
+    name: "Shivari",
+    aliases: ["shivari"],
+    area: "Srithanu",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Shivari+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~12 min by scooter",
+      fromSrithanu: "5 min by scooter / 10 min walk",
+    },
+    localInsight: "Popular retreat and event venue. Usually has workshops and gatherings across the week.",
+  },
+  {
+    id: "agama",
+    name: "Agama Yoga",
+    aliases: ["agama"],
+    area: "Srithanu",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Agama+Yoga+School+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~12 min by scooter",
+      fromSrithanu: "5–10 min by scooter",
+    },
+    localInsight: "One of the most established yoga schools on the island. Month-long intensives fill up fast.",
+  },
+  {
+    id: "baan-tai",
+    name: "Baan Tai",
+    aliases: ["baan tai"],
+    area: "South coast (between Thong Sala and Haad Rin)",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Baan+Tai+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~10 min by scooter",
+      fromSrithanu: "~20 min by scooter",
+    },
+    localInsight: "The jungle party corridor. Many of the midweek electronic music events happen here.",
+  },
+  {
+    id: "haad-yuan",
+    name: "Haad Yuan",
+    aliases: ["haad yuan"],
+    area: "Southeast coast",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Haad+Yuan+Beach+Koh+Phangan",
+    transportNotes: {
+      fromThongSala: "~30 min by scooter + short walk / longtail from Haad Rin (~15 min)",
+      fromSrithanu: "~40 min by scooter",
+    },
+    localInsight: "One of the best swimming beaches. Quieter than the west coast, harder to reach — that's the point.",
+  },
+];
+
+export const VENUE_DB: Record<string, VenueData> = Object.fromEntries(
+  VENUES.flatMap(venue => venue.aliases.map(alias => [alias, venue])),
+);
+
+export const KNOWN_VENUE_KEYS: string[] = Object.keys(VENUE_DB).sort((a, b) => b.length - a.length);
+
+export function extractVenueFromText(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  return KNOWN_VENUE_KEYS.find(key => lower.includes(key));
+}
+
+export function getVenueByReference(reference: string): VenueData | undefined {
+  return VENUE_DB[reference.toLowerCase()];
+}
+
+export function formatVenueCard(venue: VenueData): string {
+  const transportLines = [`• From Thong Sala: ${venue.transportNotes.fromThongSala}`];
+  if (venue.transportNotes.fromSrithanu !== "You're here") {
+    transportLines.push(`• From Srithanu: ${venue.transportNotes.fromSrithanu}`);
+  }
+  if (venue.transportNotes.walkNote) {
+    transportLines.push(`• Note: ${venue.transportNotes.walkNote}`);
+  }
+
+  const locationDetails = [
+    `📍 ${venue.name}`,
+    ``,
+    `Area:`,
+    venue.area,
+  ];
+  if (venue.nearbyLandmark) {
+    locationDetails.push(``, `Nearby landmark:`, venue.nearbyLandmark);
+  }
+
+  return [
+    ...locationDetails,
+    ``,
+    `Google Maps:`,
+    venue.googleMapsUrl,
+    ``,
+    `How to get there:`,
+    ...transportLines,
+    ``,
+    `Local Insight:`,
+    venue.localInsight,
+  ].join("\n");
+}
+
+export function buildLocationAnswer(question: string): string {
+  const q = question.toLowerCase();
+
+  for (const key of KNOWN_VENUE_KEYS) {
+    if (q.includes(key)) {
+      return formatVenueCard(VENUE_DB[key]!);
+    }
+  }
+
+  if (/airport|fly|flight/.test(q)) {
+    return [
+      "📍 Thong Sala Pier (main arrival point)",
+      "",
+      "Area:",
+      "Thong Sala — main town",
+      "",
+      "Google Maps:",
+      "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Pier+Koh+Phangan",
+      "",
+      "How to get there:",
+      "• Fly to Koh Samui (USM), then take the Lomprayah ferry — 30 min",
+      "• Bangkok → Samui: ~1 hour, several flights daily",
+      "• Budget route: Surat Thani + night ferry (~4 hours, cheaper)",
+      "",
+      "Local Insight:",
+      "Book Lomprayah online — it sells out around Full Moon week.",
+    ].join("\n");
+  }
+
+  if (/ferry|boat|from samui|from koh tao|from surat/.test(q)) {
+    return [
+      "📍 Thong Sala Pier",
+      "",
+      "Area:",
+      "Main town",
+      "",
+      "Google Maps:",
+      "https://www.google.com/maps/search/?api=1&query=Thong+Sala+Pier+Koh+Phangan",
+      "",
+      "How to get there:",
+      "• From Koh Samui: 30–45 min (Lomprayah or Seatran)",
+      "• From Koh Tao: 1.5–2 hours",
+      "• From Surat Thani: 3–4 hours (night ferry available)",
+      "",
+      "Local Insight:",
+      "Book Lomprayah online. Seatran is walk-on but slower.",
+    ].join("\n");
+  }
+
+  return "Which place do you want the pin for?";
+}

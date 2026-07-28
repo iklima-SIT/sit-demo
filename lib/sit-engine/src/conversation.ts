@@ -2,16 +2,79 @@
  * SIT conversation engine — pure TypeScript, no framework dependencies.
  *
  * This module is the single source of truth for SIT's conversational logic.
- * It is imported by:
- *   - artifacts/api-server  (Twilio WhatsApp webhook)
- *
- * The React frontend (artifacts/sit-demo) contains an inline copy of this
- * logic in src/pages/chat.tsx. Any changes here should be kept in sync there.
+ * It is imported by both browser and WhatsApp adapters.
  */
 
-import type { UserContext, SITResponse, SITBrief } from "./types.js";
+import type {
+  AssistantDecision,
+  ConversationMemory,
+  ConversationState,
+  DeveloperTrace,
+  MemoryUpdates,
+  RunConversationTurnInput,
+  RunConversationTurnOutput,
+  UserRequestContext,
+  UserContext,
+  SITResponse,
+  SITBrief,
+} from "./types.js";
+import { INITIAL_CTX } from "./types.js";
+import { classifyIntent, isDirectQuestion, isEventBroadeningRequest, isTomorrowEventQuery } from "./intent-router.js";
+import { applyMemoryUpdates, getMemoryTrace, isEventNarrowFollowUp, isEventTomorrowFollowUp, rememberVenueFromAssistantText, resolveVenueReference } from "./memory.js";
+import { buildEventFallback, buildHonestFallback } from "./knowledge.js";
+import { createEventSearchRequest, hasExplicitEventTimeExpression, resolveEventFilteringCutoff, type EventSearchRequest } from "./time-resolver.js";
+import type { EventSearchFilters } from "./event-filters.js";
+import { sanitizeAssistantMessages } from "./customer-output.js";
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
+
+function toDisplayName(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .slice(0, 2)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export function detectFirstName(raw: string): string | undefined {
+  const cleaned = raw
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/^(my name is|i am|i'm|im|call me|it's|its)\s+/i, "")
+    .trim();
+  if (!cleaned || cleaned.length > 40) return undefined;
+  if (/[?]/.test(raw)) return undefined;
+  if (/^(where|what|when|how|who|which|do|does|is|are|can|could|should|would|send|show|find|recommend|book|reserve)\b/i.test(cleaned)) return undefined;
+  if (/\b(cafe|café|bar|restaurant|hotel|hostel|resort|beach|club|studio|shala|centre|center|school)\b/i.test(cleaned)) return undefined;
+  if (detectPurpose(cleaned.toLowerCase()) || detectDuration(cleaned.toLowerCase())) return undefined;
+  if (!/^[a-zA-Z][a-zA-Z' -]*$/.test(cleaned)) return undefined;
+  return toDisplayName(cleaned);
+}
+
+function detectEmbeddedFirstName(raw: string): string | undefined {
+  const match = raw.match(/\b(?:my name is|i am|i['’]m|im|call me)\s+([a-zA-Z][a-zA-Z' -]{0,39}?)(?=[,.!?\n]|$)/i);
+  return match?.[1] ? detectFirstName(match[1]) : undefined;
+}
+
+export function detectAge(t: string): number | undefined {
+  const match = t.match(/\b(?:i(?:'m| am)\s*)?([1-9][0-9])(?:\s*(?:years?\s*old|yo))?\b/);
+  if (!match?.[1]) return undefined;
+  const age = Number(match[1]);
+  return age >= 13 && age <= 99 ? age : undefined;
+}
+
+export function detectGenderIdentity(raw: string): string | undefined {
+  const t = raw.toLowerCase().trim();
+  if (/prefer not|rather not|skip|not say|no need|private/.test(t)) return "not-shared";
+  if (/\b(woman|female|girl|she\/her|she her)\b/.test(t)) return "woman";
+  if (/\b(man|male|guy|he\/him|he him)\b/.test(t)) return "man";
+  if (/\b(non.?binary|nonbinary|they\/them|they them|genderqueer|trans)\b/.test(t)) return "non-binary";
+  const cleaned = raw.trim().replace(/[.!?]+$/g, "");
+  if (cleaned.length > 0 && cleaned.length <= 40 && !/[?]/.test(cleaned)) return cleaned;
+  return undefined;
+}
 
 export function detectPurpose(t: string): string | undefined {
   if (/wellness|yoga|health|spiritual|retreat|meditation|healing|detox|cleanse|mindful|ceremony/.test(t)) return "wellness";
@@ -19,10 +82,94 @@ export function detectPurpose(t: string): string | undefined {
   if (/work|remote|laptop|productivity|cowork|startup|digital.?nomad|freelan|build/.test(t)) return "remote-work";
   if (/romance|partner|love|honeymoon|couple|girlfriend|boyfriend|romantic/.test(t)) return "romance";
   if (/community|friends|belong|connect|tribe/.test(t)) return "community";
-  if (/nature|jungle|beach|swim|hike|outdoor|island|waterfall/.test(t)) return "nature";
+  if (/nature|jungle|beach|swim|hike|outdoor|island|waterfall|adventure/.test(t)) return "nature";
   if (/move|relocate|live here|settle|expat|emigrat|permanent/.test(t)) return "moving";
   if (/not.?sure|unsure|don.?t know|open|flexible|reset|escape|break|burnout|tired|overwhelm|change/.test(t)) return "unsure";
   return undefined;
+}
+
+export function detectPurposeDetail(t: string, purpose?: string, existing?: string): string | undefined {
+  if (/human connection|genuine connection|connection|belong|friends|meet people/.test(t)) return "human-connection";
+  if (/through part|nightlife|club|dj|dancefloor|rave/.test(t)) return "connection-nightlife";
+  if (/music venue|through music|live music|jam|open mic/.test(t)) return "connection-music";
+  if (/wellness center|through wellness|healing center/.test(t)) return "connection-wellness";
+  if (/through yoga|yoga class/.test(t)) return "connection-yoga";
+  if (/workshop|class|learning/.test(t)) return purpose === "community" ? "connection-workshops" : "workshops";
+  if (/volunteer|volunteering|help out/.test(t)) return "connection-volunteering";
+  if (/cowork|co.?working|network|entrepreneur|founder|business/.test(t)) return "connection-networking";
+  if (/sport|volleyball|climb|acro|movement/.test(t)) return "connection-sports";
+  if (/beach gathering|sunset|beach/.test(t)) return "connection-beach";
+  if (/conscious community|circle|men.?s circle|women.?s circle|intimate|deep conversation/.test(t)) return "connection-conscious";
+
+  if (/rest|relax|nervous system|sleep|recover|recovery|burnout/.test(t)) return "wellness-rest";
+  if (/spiritual|spirituality/.test(t)) return "spirituality";
+  if (/personal growth|growth|inner work|transform/.test(t)) return "wellness-growth";
+  if (/physical health|fitness|body|strong|stretch/.test(t)) return "wellness-physical";
+  if (/\bmix\b|all of it|bit of everything/.test(t)) return existing ?? "mixed";
+
+  if (/house|techno|minimal|psytrance|trance|reggae|commercial|ecstatic dance|live music/.test(t)) return "music-style";
+  if (/great music|serious music|good music/.test(t)) return "music-broad";
+  if (/social energy/.test(t)) return "music-social";
+  if (/all.?night|all night|late/.test(t)) return "music-intense";
+
+  if (/creative|creativity|art|artist|maker/.test(t)) return "creativity";
+  if (/active|hiking|swimming|adventure/.test(t)) return "nature-active";
+  if (/contemplative|quiet|sunset|calm/.test(t)) return "nature-quiet";
+  if (/partner|couple|together/.test(t)) return "romance-partner";
+  if (/solo/.test(t)) return "romance-solo";
+  return undefined;
+}
+
+function shouldUpdatePurposeDetail(existing: string | undefined, detected: string): boolean {
+  if (!existing) return true;
+  if (existing === detected) return false;
+  if (existing === "human-connection" && detected.startsWith("connection-")) return true;
+  return needsSecondLayerDiscovery({ ...INITIAL_CTX, purposeDetail: existing });
+}
+
+function needsSecondLayerDiscovery(ctx: UserContext): boolean {
+  const detail = ctx.purposeDetail;
+  if (!detail || ctx.purposeDetailAsked) return false;
+  return [
+    "human-connection",
+    "spirituality",
+    "music-broad",
+    "music-social",
+    "creativity",
+    "mixed",
+  ].includes(detail);
+}
+
+function secondLayerFollowUp(ctx: UserContext): { message: string; suggestions?: string[] } {
+  const detail = ctx.purposeDetail;
+  if (detail === "human-connection") {
+    return {
+      message: "What kind of connection are you hoping to find — more social, more conscious, more creative, or more everyday island life?",
+      suggestions: ["Parties", "Music venues", "Wellness centers", "Yoga", "Workshops", "Sports", "Beach gatherings", "Deep conversations"],
+    };
+  }
+  if (detail === "spirituality") {
+    return {
+      message: "Do you mean a gentle spiritual atmosphere, a regular practice, or deeper ceremonies and containers?",
+      suggestions: ["Gentle atmosphere", "Yoga or meditation", "Sound healing", "Ceremony", "Not sure yet"],
+    };
+  }
+  if (detail === "music-broad" || detail === "music-social") {
+    return {
+      message: "What kind of music night usually works for you — proper sound, easy social energy, live music, or something more ecstatic?",
+      suggestions: ["House / techno", "Psytrance", "Live music", "Ecstatic dance", "Easy social", "No strong preference"],
+    };
+  }
+  if (detail === "creativity") {
+    return {
+      message: "Do you want creativity through making things, performing, meeting artists, or just being around that scene?",
+      suggestions: ["Art workshops", "Music / performance", "Meet artists", "Creative community", "A bit of all"],
+    };
+  }
+  return {
+    message: "Which version of that feels closest to what you want?",
+    suggestions: ["Social", "Wellness", "Creative", "Active", "Quiet", "Not sure yet"],
+  };
 }
 
 export function detectDuration(t: string): string | undefined {
@@ -49,20 +196,578 @@ export function detectSociability(t: string): string | undefined {
   return undefined;
 }
 
+export function detectGroupComposition(t: string): string | undefined {
+  if (/\b(solo|alone|myself|on my own)\b/.test(t)) return "solo";
+  if (/\b(couple|partner|girlfriend|boyfriend|wife|husband|with my girl|with my guy)\b/.test(t)) return "couple";
+  if (/\b(friend|friends|mate|mates)\b/.test(t)) return "friends";
+  if (/\b(group|crew|team)\b/.test(t)) return "group";
+  if (/\b(family|kids|children|child|parents)\b/.test(t)) return "family";
+  return undefined;
+}
+
+function applyExplicitContextSignals(userMessage: string, ctx: UserContext, allowBarePurpose: boolean, allowPendingAnswers: boolean): UserContext {
+  const t = userMessage.toLowerCase();
+  const c = { ...ctx, lastActiveAt: Date.now() };
+  if (!c.firstName) {
+    c.firstName = detectEmbeddedFirstName(userMessage)
+      ?? (allowPendingAnswers && c.firstNameAsked ? detectFirstName(userMessage) : undefined);
+  }
+  if (allowPendingAnswers && !c.age && c.ageAsked) c.age = detectAge(t);
+  if (allowPendingAnswers && !c.genderIdentity && c.genderIdentityAsked) c.genderIdentity = detectGenderIdentity(userMessage);
+
+  const containsPersonalNeed = /\b(i want|i need|i(?:'m| am) looking|i came|i(?:'m| am) here|hoping for|my focus)\b/.test(t);
+  if (!c.purpose && (allowBarePurpose || containsPersonalNeed)) c.purpose = detectPurpose(t);
+  const detectedDetail = c.purpose ? detectPurposeDetail(t, c.purpose, c.purposeDetail) : undefined;
+  if (detectedDetail && shouldUpdatePurposeDetail(c.purposeDetail, detectedDetail)) {
+    c.purposeDetail = detectedDetail;
+  }
+  if (!c.duration) c.duration = detectDuration(t);
+  if (allowPendingAnswers && !c.scooter) c.scooter = detectScooter(t);
+  if (allowPendingAnswers && !c.sociability) c.sociability = detectSociability(t);
+  if (allowPendingAnswers && !c.groupComposition) c.groupComposition = detectGroupComposition(t);
+  return c;
+}
+
+function hydrateContextFromProfile(context: UserContext, profile: Partial<UserContext> | undefined): UserContext {
+  if (!profile) return context;
+  return {
+    ...context,
+    firstName: context.firstName ?? profile.firstName,
+    age: context.age ?? profile.age,
+    genderIdentity: context.genderIdentity ?? profile.genderIdentity,
+    purpose: context.purpose ?? profile.purpose,
+    purposeDetail: context.purposeDetail ?? profile.purposeDetail,
+    groupComposition: context.groupComposition ?? profile.groupComposition,
+    duration: context.duration ?? profile.duration,
+    scooter: context.scooter ?? profile.scooter,
+    sociability: context.sociability ?? profile.sociability,
+  };
+}
+
+function isHumanConnectionContext(ctx: UserContext): boolean {
+  return ctx.purpose === "community"
+    && typeof ctx.purposeDetail === "string"
+    && (ctx.purposeDetail === "human-connection" || ctx.purposeDetail.startsWith("connection-"));
+}
+
+function needsGroupCompositionQuestion(ctx: UserContext): boolean {
+  return isHumanConnectionContext(ctx)
+    && !needsSecondLayerDiscovery(ctx)
+    && !ctx.groupComposition
+    && !ctx.groupCompositionAsked;
+}
+
 // ─── Acknowledgments ──────────────────────────────────────────────────────────
 
 function ack(purpose: string): string {
   const map: Record<string, string> = {
-    wellness:      "Good choice.",
-    music:         "Right island for it.",
-    "remote-work": "Smart — the infrastructure here is solid.",
-    romance:       "Right place, if you know where to go.",
-    community:     "This island is unusually good at that.",
-    nature:        "More of it than the Instagram version suggests.",
-    moving:        "Interesting. A few thousand people have made that move.",
-    unsure:        "That's a valid way to arrive.",
+    wellness: "A lot of people come here for exactly that.",
+    music: "You've picked the right island for it.",
+    "remote-work": "Smart call — the infrastructure here has gotten serious.",
+    romance: "Koh Phangan delivers on that one, when you know where to look.",
+    community: "This island is unusually good at building that kind of thing.",
+    nature: "There's more of it than the Instagram version lets on.",
+    moving: "Interesting. A few thousand people have made exactly that move.",
+    unsure: "Honestly, that's a valid way to arrive. Sometimes the island decides for you.",
   };
   return map[purpose] ?? "Good to know.";
+}
+
+export interface DecisionInput {
+  userMessage: string;
+  context: UserContext;
+  memory: ConversationMemory;
+  isPostBrief?: boolean;
+  plansVisible?: boolean;
+  devTrace?: boolean;
+}
+
+function buildTrace(
+  userMessage: string,
+  memory: ConversationMemory,
+  decision: Omit<AssistantDecision, "trace">,
+  onboardingTriggered: boolean,
+): DeveloperTrace {
+  return {
+    detectedIntent: decision.intent,
+    activeTopic: memory.lastTopic,
+    memoryUsed: getMemoryTrace(userMessage, memory),
+    serviceSelected: decision.requiredService,
+    onboardingTriggered,
+    reason: decision.debugReason,
+  };
+}
+
+export function decideAssistantAction(input: DecisionInput): AssistantDecision {
+  const trimmed = input.userMessage.trim();
+  const venueRef = resolveVenueReference(trimmed, input.memory);
+  const detectedIntent = classifyIntent(trimmed, input.memory);
+  const onboardingIncomplete = !input.context.briefGenerated && input.memory.onboardingStage !== "complete";
+  const informationModeUpdates = (): MemoryUpdates => ({
+    currentMode: "information",
+    onboardingPaused: onboardingIncomplete,
+  });
+  const bareVenueReference = Boolean(venueRef?.source === "user" && !isDirectQuestion(trimmed) && trimmed.split(/\s+/).length <= 4);
+
+  let decision: Omit<AssistantDecision, "trace">;
+
+  if (isEventTomorrowFollowUp(trimmed, input.memory)) {
+    decision = {
+      intent: "follow_up",
+      action: "call_live_events",
+      answerMode: "service",
+      requiredService: "events",
+      memoryUpdates: { pendingEventFollowUp: undefined, lastTopic: "events", ...informationModeUpdates() },
+      debugReason: "Resolved affirmative reply against pending tomorrow event follow-up.",
+    };
+  } else if (isEventNarrowFollowUp(trimmed, input.memory)) {
+    decision = {
+      intent: "follow_up",
+      action: "call_live_events",
+      answerMode: "service",
+      requiredService: "events",
+      memoryUpdates: { pendingEventFollowUp: undefined, lastTopic: "events", ...informationModeUpdates() },
+      debugReason: "Resolved category reply against pending event narrowing follow-up.",
+    };
+  } else if (venueRef && (detectedIntent === "location_request" || venueRef.source === "memory" || bareVenueReference)) {
+    decision = {
+      intent: "location_request",
+      action: "resolve_location",
+      answerMode: "service",
+      requiredService: "location",
+      memoryUpdates: { lastVenue: venueRef.id, ...informationModeUpdates() },
+      debugReason: venueRef.source === "memory"
+        ? "Resolved location request using lastVenue memory."
+        : "Resolved location request from explicit venue reference.",
+    };
+  } else {
+    const intent = detectedIntent;
+    const direct = isDirectQuestion(trimmed);
+
+    if (intent === "live_event_search") {
+      decision = {
+        intent,
+        action: "call_live_events",
+        answerMode: "service",
+        requiredService: "events",
+        memoryUpdates: { lastTopic: "events", ...informationModeUpdates() },
+        debugReason: "Direct live event request takes priority over onboarding.",
+      };
+    } else if (intent === "follow_up" && input.memory.lastTopic === "events") {
+      decision = {
+        intent,
+        action: "call_live_events",
+        answerMode: "service",
+        requiredService: "events",
+        memoryUpdates: { lastTopic: "events", ...informationModeUpdates() },
+        debugReason: "Resolved event-related follow-up from conversation memory.",
+      };
+    } else if (intent === "location_request") {
+      decision = {
+        intent,
+        action: "resolve_location",
+        answerMode: "service",
+        requiredService: "location",
+        memoryUpdates: { ...(venueRef ? { lastVenue: venueRef.id } : {}), ...informationModeUpdates() },
+        debugReason: "Direct location request takes priority over onboarding.",
+      };
+    } else if (input.isPostBrief && !input.plansVisible && /\b(plan|itinerary|schedule|day.by.day|show me (a |the )?plan|put together (a )?plan|yes (please|i (would|want))|yes.*(plan|itinerary)|i('d| would) (love|like) (a |that )?plan)\b/i.test(trimmed)) {
+      decision = {
+        intent: "planning",
+        action: "show_plans",
+        answerMode: "text",
+        requiredService: "none",
+        memoryUpdates: {},
+        debugReason: "Post-brief plan request selected plan options.",
+      };
+    } else if (input.isPostBrief || direct || intent === "practical_information" || intent === "definition" || intent === "recommendation" || intent === "advice" || intent === "planning") {
+      decision = {
+        intent,
+        action: "retrieve_knowledge",
+        answerMode: "service",
+        requiredService: "knowledge",
+        memoryUpdates: direct || intent === "practical_information" || intent === "definition"
+          ? informationModeUpdates()
+          : {},
+        debugReason: direct
+          ? "Direct user question takes priority over onboarding."
+          : "Post-brief or expert intent selected knowledge mode.",
+      };
+    } else {
+      decision = {
+        intent: "onboarding",
+        action: "continue_onboarding",
+        answerMode: "text",
+        requiredService: "none",
+        memoryUpdates: {
+          currentMode: input.context.briefGenerated ? "local_expert" : "discovery",
+          onboardingPaused: false,
+        },
+        debugReason: "No direct request detected; continue onboarding state machine.",
+      };
+    }
+  }
+
+  const fullDecision: AssistantDecision = { ...decision };
+  if (input.devTrace) {
+    fullDecision.trace = buildTrace(trimmed, input.memory, decision, decision.action === "continue_onboarding");
+  }
+  return fullDecision;
+}
+
+export function createInitialConversationState(): ConversationState {
+  return {
+    context: { ...INITIAL_CTX, lastActiveAt: Date.now() },
+    memory: {
+      currentMode: "discovery",
+      onboardingStage: "purpose",
+      onboardingPaused: false,
+    },
+    turns: [],
+  };
+}
+
+export function startConversation(state: ConversationState = createInitialConversationState()): RunConversationTurnOutput {
+  const messages = sanitizeAssistantMessages([
+    { type: "text" as const, text: "Hey, I'm SIT. I help people make better calls on Koh Phangan, the kind a good local friend would make." },
+    { type: "text" as const, text: "I'm glad you're here. What should I call you?" },
+  ]);
+  return {
+    messages,
+    updatedState: {
+      ...state,
+      context: {
+        ...state.context,
+        firstNameAsked: true,
+      },
+      memory: {
+        ...state.memory,
+        currentMode: "discovery",
+        onboardingStage: "purpose",
+      },
+      turns: [
+        ...state.turns,
+        ...messages.map(message => ({
+          role: "assistant" as const,
+          text: message.text,
+          timestamp: Date.now(),
+        })),
+      ],
+    },
+  };
+}
+
+function appendAssistantMessages(state: ConversationState, messages: Array<{ type: "text"; text: string }>, decision?: AssistantDecision): ConversationState {
+  return {
+    ...state,
+    turns: [
+      ...state.turns,
+      ...messages.map(message => ({
+        role: "assistant" as const,
+        text: message.text,
+        timestamp: Date.now(),
+        decision,
+      })),
+    ],
+  };
+}
+
+function appendUserTurn(state: ConversationState, text: string): ConversationState {
+  return {
+    ...state,
+    turns: [
+      ...state.turns,
+      {
+        role: "user",
+        text,
+        timestamp: Date.now(),
+      },
+    ],
+  };
+}
+
+function applyAssistantTextMemory(state: ConversationState, messages: Array<{ type: "text"; text: string }>): ConversationState {
+  return messages.reduce(
+    (nextState, message) => ({
+      ...nextState,
+      memory: rememberVenueFromAssistantText(nextState.memory, message.text),
+    }),
+    state,
+  );
+}
+
+function compactEventFilters(filters: EventSearchFilters): EventSearchFilters | undefined {
+  if (!filters.categories?.length && !filters.audience && !filters.area) return undefined;
+  return filters;
+}
+
+function mergeEventFilters(
+  previous: EventSearchFilters | undefined,
+  explicit: EventSearchFilters | undefined,
+  broadenCategories: boolean,
+): EventSearchFilters | undefined {
+  return compactEventFilters({
+    categories: broadenCategories ? undefined : explicit?.categories ?? previous?.categories,
+    audience: explicit?.audience ?? previous?.audience,
+    area: explicit?.area ?? previous?.area,
+  });
+}
+
+function buildUserRequestContext(message: string, request: EventSearchRequest): UserRequestContext {
+  return {
+    type: "event_search",
+    originalMessage: message,
+    requestMode: /\b(recommend|best|should i|right for me)\b/i.test(message) ? "decision" : "information",
+    requestedDate: request.timeWindow.sourceExpression,
+    requestedTimeWindow: request.timeWindow,
+    requestedCategory: request.filters?.categories?.[0],
+    requestedArea: request.filters?.area,
+    requestedScope: request.filters?.area ? "area" : "island-wide",
+    requestedFilters: request.filters,
+    unresolvedAmbiguities: request.timeWindow.clarificationNeeded ? ["time_window"] : [],
+  };
+}
+
+function clearPendingUserRequest(memory: ConversationMemory): ConversationMemory {
+  const { pendingUserRequest: _pendingUserRequest, ...rest } = memory;
+  return rest;
+}
+
+export async function runConversationTurn(input: RunConversationTurnInput): Promise<RunConversationTurnOutput> {
+  const trimmed = input.message.trim();
+  if (!trimmed && input.state.turns.length === 0) {
+    return startConversation(input.state);
+  }
+
+  let workingState = appendUserTurn(input.state, trimmed);
+  const rememberedContext = hydrateContextFromProfile(workingState.context, workingState.memory.userProfile);
+  const explicitContext = applyExplicitContextSignals(trimmed, rememberedContext, false, false);
+  workingState = {
+    ...workingState,
+    context: explicitContext,
+    memory: {
+      ...workingState.memory,
+      userProfile: {
+        ...workingState.memory.userProfile,
+        firstName: explicitContext.firstName,
+        age: explicitContext.age,
+        genderIdentity: explicitContext.genderIdentity,
+        purpose: explicitContext.purpose,
+        purposeDetail: explicitContext.purposeDetail,
+        groupComposition: explicitContext.groupComposition,
+        duration: explicitContext.duration,
+        scooter: explicitContext.scooter,
+        sociability: explicitContext.sociability,
+      },
+    },
+  };
+  const confirmedTomorrowFollowUp = isEventTomorrowFollowUp(trimmed, workingState.memory);
+  const broadensEventSearch = isEventBroadeningRequest(trimmed);
+  const decision = decideAssistantAction({
+    userMessage: trimmed,
+    context: workingState.context,
+    memory: workingState.memory,
+    isPostBrief: workingState.context.briefGenerated,
+    devTrace: input.devTrace,
+  });
+
+  workingState = {
+    ...workingState,
+    memory: applyMemoryUpdates(workingState.memory, decision.memoryUpdates),
+  };
+
+  if (decision.action === "show_plans") {
+    const plan = await input.services.plans.generate(workingState.context, workingState.context.duration);
+    const messages = sanitizeAssistantMessages([{ type: "text" as const, text: plan.message }]);
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    return {
+      messages,
+      planOptions: plan.options,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+    };
+  }
+
+  if (decision.action === "resolve_location") {
+    const location = await input.services.location.resolve(trimmed, workingState.memory);
+    const messages = sanitizeAssistantMessages([{ type: "text" as const, text: location.answer }]);
+    workingState = {
+      ...workingState,
+      memory: {
+        ...workingState.memory,
+        lastVenue: location.venueId ?? workingState.memory.lastVenue,
+        lastArea: location.area ?? workingState.memory.lastArea,
+      },
+    };
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    workingState = applyAssistantTextMemory(workingState, messages);
+    return {
+      messages,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+    };
+  }
+
+  if (decision.action === "call_live_events") {
+    const now = new Date();
+    const eventQuery = confirmedTomorrowFollowUp ? "tomorrow events on Koh Phangan" : trimmed;
+    const resolvedEventRequest = createEventSearchRequest(eventQuery, now, {
+      browserTimezone: input.clientContext?.browserTimezone,
+    });
+    const previousEvent = workingState.memory.lastEvent;
+    const originalRequest = workingState.memory.originalRequest;
+    const previousWindow = previousEvent?.timeWindow ?? originalRequest?.requestedTimeWindow;
+    const shouldPreserveWindow = decision.intent === "follow_up"
+      && !confirmedTomorrowFollowUp
+      && !hasExplicitEventTimeExpression(trimmed)
+      && Boolean(previousWindow);
+    const timeWindow = shouldPreserveWindow ? previousWindow! : resolvedEventRequest.timeWindow;
+    const previousFilters = previousEvent?.filters ?? originalRequest?.requestedFilters;
+    const filters = decision.intent === "follow_up"
+      ? mergeEventFilters(previousFilters, resolvedEventRequest.filters, broadensEventSearch)
+      : resolvedEventRequest.filters;
+    const eventRequest = {
+      ...resolvedEventRequest,
+      timeWindow,
+      clock: {
+        ...resolvedEventRequest.clock,
+        filteringCutoff: resolveEventFilteringCutoff(timeWindow, now),
+      },
+      filters,
+      userContext: workingState.context,
+    };
+    const requestContext = buildUserRequestContext(trimmed, eventRequest);
+    const storedOriginalRequest = decision.intent === "live_event_search"
+      ? requestContext
+      : workingState.memory.originalRequest ?? requestContext;
+    workingState = {
+      ...workingState,
+      memory: {
+        ...workingState.memory,
+        originalRequest: storedOriginalRequest,
+        pendingUserRequest: requestContext,
+      },
+    };
+    const scope = isTomorrowEventQuery(eventQuery)
+      ? "tomorrow"
+      : decision.intent === "follow_up"
+        ? "narrow"
+        : "tonight";
+    const eventResult = await input.services.events.search(eventRequest, { state: workingState, scope });
+    const text = eventResult.fallback || !eventResult.response
+      ? eventResult.fallbackMessage ?? buildEventFallback(scope)
+      : eventResult.response;
+    const messages = sanitizeAssistantMessages([{ type: "text" as const, text }]);
+    workingState = {
+      ...workingState,
+      memory: {
+        ...clearPendingUserRequest(workingState.memory),
+        lastTopic: "events",
+        lastArea: eventRequest.filters?.area ?? workingState.memory.lastArea,
+        lastTimeWindow: eventRequest.timeWindow,
+        lastTimeLabel: eventRequest.timeWindow.label,
+        lastTemporalExpression: eventRequest.timeWindow.sourceExpression,
+        pendingEventFollowUp: eventResult.fallback || !eventResult.response
+          ? scope === "tonight" ? "tomorrow" : undefined
+          : scope === "tomorrow" ? "narrow" : "tomorrow",
+        lastEvent: {
+          scope,
+          query: eventRequest.queryText,
+          timeWindow: eventRequest.timeWindow,
+          filters: eventRequest.filters,
+        },
+      },
+    };
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    return {
+      messages,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+      event: {
+        timeWindow: eventResult.timeWindow ?? eventRequest.timeWindow,
+        originalTemporalText: eventRequest.timeWindow.sourceExpression,
+        providerQueryWindow: `${eventRequest.timeWindow.startTime} -> ${eventRequest.timeWindow.endTime} (${eventRequest.timeWindow.timezone})`,
+        rejectedCandidates: eventResult.rejectedCandidates,
+        diagnostics: eventResult.diagnostics,
+      },
+    };
+  }
+
+  if (decision.action === "retrieve_knowledge") {
+    const knowledge = await input.services.knowledge.search(trimmed, {
+      state: workingState,
+      purpose: workingState.context.purpose,
+    });
+    const messages = sanitizeAssistantMessages([{
+      type: "text" as const,
+      text: knowledge.answer ?? buildHonestFallback(trimmed),
+    }]);
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    workingState = applyAssistantTextMemory(workingState, messages);
+    return {
+      messages,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+      knowledge: knowledge.references?.length || knowledge.version || knowledge.importedAt
+        ? {
+            references: knowledge.references ?? [],
+            version: knowledge.version,
+            importedAt: knowledge.importedAt,
+          }
+        : undefined,
+    };
+  }
+
+  const response = processMessage(trimmed, workingState.context);
+  workingState = {
+    ...workingState,
+    context: response.updatedContext,
+    memory: {
+      ...workingState.memory,
+      currentMode: response.updatedContext.briefGenerated ? "local_expert" : "discovery",
+      onboardingStage: response.briefReady
+        ? "brief"
+        : response.updatedContext.sociabilityAsked
+          ? "sociability"
+          : response.updatedContext.scooterAsked
+            ? "scooter"
+            : response.updatedContext.purposeFollowUpAsked
+              ? "purpose_follow_up"
+              : "purpose",
+    },
+  };
+
+  const messages = sanitizeAssistantMessages(response.briefReady
+    ? [
+        { type: "text" as const, text: response.message },
+        { type: "text" as const, text: "Want me to put together a plan for your stay?" },
+      ]
+    : [{ type: "text" as const, text: response.message }]);
+  workingState = response.briefReady
+    ? {
+        ...workingState,
+        memory: {
+          ...workingState.memory,
+          pendingFollowUp: "plan",
+          currentMode: "local_expert",
+          onboardingStage: "complete",
+        },
+      }
+    : workingState;
+  workingState = appendAssistantMessages(workingState, messages, decision);
+
+  return {
+    messages,
+    suggestions: response.suggestions,
+    brief: response.briefReady ? buildBrief(response.updatedContext) : undefined,
+    updatedState: workingState,
+    trace: decision.trace,
+    decision,
+  };
 }
 
 // ─── Core conversation function ───────────────────────────────────────────────
@@ -75,104 +780,130 @@ function ack(purpose: string): string {
  * the frontend chat engine.
  */
 export function processMessage(userMessage: string, ctx: UserContext): SITResponse {
-  const t = userMessage.toLowerCase();
-  const c: UserContext = { ...ctx, lastActiveAt: Date.now() };
-
-  // Extract signals from every message, regardless of which question we asked.
-  // This lets users answer multiple things at once ("I'm coming for wellness, 10 days").
-  if (!c.purpose) c.purpose = detectPurpose(t);
-  if (!c.duration) c.duration = detectDuration(t);
-  if (!c.scooter) c.scooter = detectScooter(t);
-  if (!c.sociability) c.sociability = detectSociability(t);
+  const c = applyExplicitContextSignals(userMessage, ctx, true, true);
 
   c.exchangeCount++;
+
+  // ── Step 0: Personal opening ───────────────────────────────────────────────
+  if (!c.firstName) {
+    c.firstNameAsked = true;
+    return {
+      message: "I'm glad you're here. What should I call you?",
+      updatedContext: c,
+    };
+  }
+
+  if (!c.age && !c.ageAsked) {
+    c.ageAsked = true;
+    return {
+      message: `Nice to meet you, ${c.firstName}. Roughly how old are you? It helps me avoid the wrong kind of recommendation.`,
+      updatedContext: c,
+    };
+  }
+
+  if (!c.genderIdentity && !c.genderIdentityAsked) {
+    c.genderIdentityAsked = true;
+    return {
+      message: "And only if you're comfortable sharing: how do you identify? It can help me suggest spaces that feel like the right fit.",
+      suggestions: ["Woman", "Man", "Non-binary", "Prefer not to say"],
+      updatedContext: c,
+    };
+  }
 
   // ── Step 1: Establish purpose ──────────────────────────────────────────────
   if (!c.purpose) {
     return {
-      message: "What's bringing you to Koh Phangan?",
+      message: "So tell me, what are you hoping this island gives you?",
       suggestions: ["Wellness", "Music & parties", "Remote work", "Romance", "Community", "Nature", "Moving here", "Not sure yet"],
       updatedContext: c,
     };
   }
 
   // ── Step 2: Purpose-specific follow-up (asked once) ───────────────────────
-  if (!c.purposeFollowUpAsked) {
+  if (!c.purposeFollowUpAsked && !c.purposeDetail) {
     c.purposeFollowUpAsked = true;
     const a = ack(c.purpose);
     const followUps: Record<string, { message: string; suggestions?: string[] }> = {
       wellness: {
-        message: `${a} What specifically — rest, spirituality, personal growth, or something physical?`,
+        message: `${a} Is it more about proper rest, spirituality, personal growth, or taking care of your body?`,
         suggestions: ["Rest", "Spirituality", "Personal growth", "Physical health", "A mix"],
       },
       music: {
-        message: `${a} Music, social energy, or the all-night experience?`,
+        message: `${a} Are you chasing the music, the people, or the all-night part of it?`,
         suggestions: ["Great music", "Social energy", "All-night parties", "All of it"],
       },
       "remote-work": {
-        message: `${a} Already productive remotely, or looking for a better rhythm?`,
+        message: `${a} Are you already in a good work rhythm, or hoping the island helps you find one?`,
         suggestions: ["Already productive", "Need a better routine", "Bit of both"],
       },
       romance: {
-        message: `${a} Traveling with a partner, or solo?`,
+        message: `${a} Are you here with someone, or is this more of a solo chapter?`,
         suggestions: ["With a partner", "Solo"],
       },
       community: {
-        message: `${a} What type — creative, spiritual, wellness, or just genuine connection?`,
+        message: `${a} What kind of circle are you hoping to find — creative, spiritual, wellness, entrepreneurial, or just genuine connection?`,
         suggestions: ["Creative", "Spiritual", "Wellness", "Entrepreneurial", "Human connection"],
       },
       nature: {
-        message: `${a} Active (hiking, swimming) or contemplative (sunsets, quiet beaches)?`,
+        message: `${a} Do you want to be active in it, or more quiet and contemplative with it?`,
         suggestions: ["Active", "Contemplative", "Both"],
       },
       moving: {
-        message: `${a} What needs to be different in your life if you make the move?`,
+        message: `${a} What would need to feel different in your life for the move to make sense?`,
       },
       unsure: {
-        message: `${a} Need genuine rest, or hoping something will happen here?`,
+        message: `${a} Does it feel more like you need real rest, or like you're hoping something opens up here?`,
         suggestions: ["Genuine rest", "Looking for something", "Somewhere between"],
       },
     };
-    return { ...(followUps[c.purpose] ?? { message: "Tell me more." }), updatedContext: c };
+    return { ...(followUps[c.purpose] ?? { message: "Tell me a little more." }), updatedContext: c };
   }
 
-  // ── Step 3: Duration ───────────────────────────────────────────────────────
-  if (!c.duration && !c.durationAsked) {
-    c.durationAsked = true;
+  if (c.purposeDetail && !c.purposeFollowUpAsked) c.purposeFollowUpAsked = true;
+
+  // ── Step 2b: Clarify broad umbrella needs only when still not actionable ───
+  if (needsSecondLayerDiscovery(c)) {
+    c.purposeDetailAsked = true;
+    return { ...secondLayerFollowUp(c), updatedContext: c };
+  }
+
+  // ── Step 2c: Context-dependent Discovery ──────────────────────────────────
+  if (needsGroupCompositionQuestion(c)) {
+    c.groupCompositionAsked = true;
     return {
-      message: "How long are you here for?",
-      suggestions: ["3–5 days", "1 week", "2–4 weeks", "1–3 months", "Long-term"],
+      message: "For that kind of connection, it matters who you're moving through the island with. Are you here solo, with a partner, with friends, or as a group?",
+      suggestions: ["Solo", "Couple", "Friends", "Group", "Family"],
       updatedContext: c,
     };
   }
 
-  // ── Step 4: Scooter ────────────────────────────────────────────────────────
+  // ── Step 3: Scooter ────────────────────────────────────────────────────────
   if (!c.scooter && !c.scooterAsked) {
     c.scooterAsked = true;
     return {
-      message: "Do you ride a scooter?",
+      message: "Practical island question: do you ride a scooter, or should I keep things easier to reach?",
       suggestions: ["Yes", "No", "Still learning", "I'd rather not"],
       updatedContext: c,
     };
   }
 
-  // ── Step 5: Sociability ────────────────────────────────────────────────────
+  // ── Step 4: Sociability ────────────────────────────────────────────────────
   if (!c.sociability && !c.sociabilityAsked) {
     c.sociabilityAsked = true;
     return {
-      message: "One more thing — how social do you want this trip to be?",
+      message: "Last thing for now: do you want this trip mostly quiet, very social, or somewhere in the middle?",
       suggestions: ["Mostly on my own", "Balanced", "Very social"],
       updatedContext: c,
     };
   }
 
-  // ── Step 6: Generate the SIT Brief ────────────────────────────────────────
-  // Triggered after at least 4 exchanges with purpose established.
+  // ── Step 5: Generate the SIT Brief ────────────────────────────────────────
+  // Triggered after enough practical context is established.
   // buildBrief() uses the accumulated context to generate the personalized brief.
-  if (c.purpose && c.exchangeCount >= 4 && !c.briefGenerated) {
+  if (c.purpose && !needsSecondLayerDiscovery(c) && (c.scooter || c.sociability) && c.exchangeCount >= 3 && !c.briefGenerated) {
     c.briefGenerated = true;
     return {
-      message: "I think I have a clear enough picture. Let me put your SIT Brief together.",
+      message: "Okay, that's enough to be useful. I'll put together your SIT Brief.",
       briefReady: true,
       updatedContext: c,
     };

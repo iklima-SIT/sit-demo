@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
+import { createLiveEventSearchInput, searchLiveEvents } from "../services/event-service";
 
 const router: IRouter = Router();
 
 router.post("/events/search", async (req, res): Promise<void> => {
-  const { query } = req.body as { query?: string };
+  const { query, browserTimezone } = req.body as { query?: string; browserTimezone?: string };
 
   if (!query || typeof query !== "string") {
     res.status(400).json({ error: "Missing query" });
@@ -12,51 +13,22 @@ router.post("/events/search", async (req, res): Promise<void> => {
 
   const apiKey = process.env.EXA_API_KEY;
   if (!apiKey) {
-    res.json({ response: null, fallback: true });
+    res.json({ response: null, fallback: true, sources: [] });
     return;
   }
 
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  const searchQuery = `Koh Phangan Thailand events and parties happening tonight on ${today}. ${query}. Include: ecstatic dance, yoga events, live music, jungle parties, beach events, community gatherings. List event names, venues, and times if available.`;
-
   try {
-    const exaRes = await fetch("https://api.exa.ai/answer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        query: searchQuery,
-        text: true,
-      }),
+    const result = await searchLiveEvents(createLiveEventSearchInput(query, new Date(), browserTimezone), apiKey);
+    req.log.info({ sources: result.sources.length, timeWindow: result.timeWindow }, "Exa event search completed");
+    res.json({
+      response: result.response,
+      fallback: result.fallback,
+      sources: result.sources,
+      timeWindow: result.timeWindow,
     });
-
-    if (!exaRes.ok) {
-      req.log.warn({ status: exaRes.status }, "Exa API non-OK response");
-      res.json({ response: null, fallback: true });
-      return;
-    }
-
-    const data = (await exaRes.json()) as {
-      answer?: string;
-      citations?: Array<{ url: string; title?: string }>;
-    };
-
-    const answer = data.answer?.trim() ?? null;
-    const sources = data.citations?.map(c => c.url) ?? [];
-
-    req.log.info({ sources: sources.length }, "Exa event search completed");
-    res.json({ response: answer, fallback: !answer, sources });
   } catch (err) {
     req.log.error({ err }, "Exa API request failed");
-    res.json({ response: null, fallback: true });
+    res.json({ response: null, fallback: true, sources: [] });
   }
 });
 

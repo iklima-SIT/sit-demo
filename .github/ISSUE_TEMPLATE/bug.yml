@@ -1,0 +1,99 @@
+name: Bug
+description: Report behavior that is incorrect or inconsistent.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: input
+    id: title
+    attributes:
+      label: Title
+      description: A short description of the incorrect behavior.
+      placeholder: Wellness request returns unrelated events
+    validations:
+      required: true
+
+  - type: input
+    id: requested-by
+    attributes:
+      label: Requested by
+      placeholder: Iklima or Stefano
+    validations:
+      required: true
+
+  - type: input
+    id: primary-owner
+    attributes:
+      label: Primary Owner
+      description: One person must own investigation and completion.
+      placeholder: Iklima or Stefano
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product-area
+    attributes:
+      label: Product Area
+      options:
+        - Conversation Orchestrator
+        - Discovery
+        - Decision
+        - Events
+        - Knowledge
+        - Memory
+        - Developer Console
+        - UI
+        - Infrastructure
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Include the user message, current result, and why it is wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behaviour
+    attributes:
+      label: Expected Behaviour
+      description: Describe what SIT should do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Include the regression cases that must pass.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: relevant-documents
+    attributes:
+      label: Relevant Documents
+      description: Link the applicable philosophy, architecture, or product documents.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - MVP blocking
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional screenshots, traces, reproduction details, or constraints.
+

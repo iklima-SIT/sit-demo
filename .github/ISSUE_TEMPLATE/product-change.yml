@@ -1,0 +1,115 @@
+name: Product Change
+description: Propose a change to product behavior, philosophy, or architecture.
+title: "[Product]: "
+labels:
+  - product
+body:
+  - type: input
+    id: title
+    attributes:
+      label: Title
+      description: A short description of the proposed product change.
+      placeholder: Refine how SIT understands human connection
+    validations:
+      required: true
+
+  - type: input
+    id: requested-by
+    attributes:
+      label: Requested by
+      placeholder: Iklima or Stefano
+    validations:
+      required: true
+
+  - type: input
+    id: primary-owner
+    attributes:
+      label: Primary Owner
+      description: One person must own the product decision and completion.
+      placeholder: Iklima or Stefano
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product-area
+    attributes:
+      label: Product Area
+      options:
+        - Conversation Orchestrator
+        - Discovery
+        - Decision
+        - Events
+        - Knowledge
+        - Memory
+        - Developer Console
+        - UI
+        - Infrastructure
+        - Documentation
+    validations:
+      required: true
+
+  - type: dropdown
+    id: philosophy-impact
+    attributes:
+      label: Does this change?
+      description: Philosophy changes require explicit approval before implementation.
+      options:
+        - THE_SIT_MIND
+        - DISCOVERY_ENGINE
+        - DECISION_ENGINE
+        - Architecture only
+        - No philosophy change
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What product problem or uncertainty requires a change?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behaviour
+    attributes:
+      label: Expected Behaviour
+      description: Describe the intended traveler or system behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: List the conditions that make this change complete.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: relevant-documents
+    attributes:
+      label: Relevant Documents
+      description: Link the documents that govern or are affected by this change.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - MVP blocking
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional discussion context, alternatives, risks, or constraints.
+
