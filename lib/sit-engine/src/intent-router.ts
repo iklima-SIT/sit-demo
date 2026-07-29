@@ -13,6 +13,21 @@ export function isDefinitionQuestion(text: string): boolean {
   return /^(what is|what'?s a |what are|who is|who'?s|explain|describe|tell me (what|about)|how does|what do you mean|define)\b/i.test(t);
 }
 
+export function isDestinationContextRequest(text: string): boolean {
+  const t = normalizeIntentText(text);
+  return /\b(buddha day|buddhist holiday|asalha puja|asanha bucha|buddhist lent|khao phansa)\b/.test(t)
+    || /\b(alcohol|liquor)\b.{0,50}\b(ban|banned|prohibited|restriction|restricted|sales?)\b/.test(t)
+    || /\b(can i buy|can (?:bars?|venues?) sell)\b.{0,30}\b(alcohol|beer|wine|liquor)\b/.test(t);
+}
+
+export function isDestinationContextFollowUp(text: string, memory: ConversationMemory): boolean {
+  if (memory.lastTopic !== "destination_context" || !memory.lastDestinationContext) return false;
+  const t = normalizeIntentText(text).trim();
+  return /^(?:and\s+)?(?:is\s+it\s+)?(?:today|tomorrow|now)\??$/.test(t)
+    || /^(?:and\s+)?what about tomorrow\??$/.test(t)
+    || /\b(until when|how long|can i buy alcohol|are bars open|can bars sell)\b/.test(t);
+}
+
 export function isEventQuery(text: string): boolean {
   if (isDefinitionQuestion(text)) return false;
   const t = normalizeIntentText(text);
@@ -98,6 +113,8 @@ export function isDateFollowUp(text: string): boolean {
 }
 
 export function classifyIntent(text: string, memory: ConversationMemory = {}): Intent {
+  if (isDestinationContextRequest(text)) return "destination_context";
+  if (isDestinationContextFollowUp(text, memory)) return "follow_up";
   if (isDefinitionQuestion(text)) return "definition";
   if (isEventQuery(text)) return "live_event_search";
   if (isLocationRequest(text)) return "location_request";
@@ -114,8 +131,12 @@ export function decideIntent(text: string, memory: ConversationMemory = {}): Ass
   const intent = classifyIntent(text, memory);
   const requiredService = intent === "live_event_search"
     ? "events"
+    : intent === "destination_context" || (intent === "follow_up" && memory.lastTopic === "destination_context")
+      ? "destination_context"
     : intent === "location_request"
       ? "location"
+      : intent === "planning"
+        ? "plans"
       : intent === "practical_information" || intent === "definition" || intent === "recommendation" || intent === "advice"
         ? "knowledge"
         : "none";
@@ -124,8 +145,12 @@ export function decideIntent(text: string, memory: ConversationMemory = {}): Ass
     intent,
     action: intent === "live_event_search"
       ? "call_live_events"
+      : intent === "destination_context" || (intent === "follow_up" && memory.lastTopic === "destination_context")
+        ? "resolve_destination_context"
       : intent === "location_request"
         ? "resolve_location"
+        : intent === "planning"
+          ? "show_plans"
         : intent === "general_chat"
           ? "continue_onboarding"
           : "retrieve_knowledge",

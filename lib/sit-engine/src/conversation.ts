@@ -32,6 +32,7 @@ import { KOH_PHANGAN_TIME_ZONE, createEventSearchRequest, hasExplicitEventTimeEx
 import type { EventSearchFilters } from "./event-filters.js";
 import { sanitizeAssistantMessages } from "./customer-output.js";
 import { extractLocationSubject, extractVenueFromText, findVenueLocationReference, venueNamesMatch } from "./venues.js";
+import { resolvePlanDuration } from "./plans.js";
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
 
@@ -355,7 +356,18 @@ export function decideAssistantAction(input: DecisionInput): AssistantDecision {
     const intent = detectedIntent;
     const direct = isDirectQuestion(trimmed);
 
-    if (intent === "live_event_search") {
+    if (intent === "destination_context" || (intent === "follow_up" && input.memory.lastTopic === "destination_context")) {
+      decision = {
+        intent,
+        action: "resolve_destination_context",
+        answerMode: "service",
+        requiredService: "destination_context",
+        memoryUpdates: { lastTopic: "destination_context", ...informationModeUpdates() },
+        debugReason: intent === "follow_up"
+          ? "Resolved the short follow-up against the active destination holiday context."
+          : "Current destination calendar request takes priority over onboarding and static knowledge.",
+      };
+    } else if (intent === "live_event_search") {
       decision = {
         intent,
         action: "call_live_events",
@@ -382,16 +394,16 @@ export function decideAssistantAction(input: DecisionInput): AssistantDecision {
         memoryUpdates: { ...(venueRef ? { lastVenue: venueRef.id } : {}), ...informationModeUpdates() },
         debugReason: "Direct location request takes priority over onboarding.",
       };
-    } else if (input.isPostBrief && !input.plansVisible && /\b(plan|itinerary|schedule|day.by.day|show me (a |the )?plan|put together (a )?plan|yes (please|i (would|want))|yes.*(plan|itinerary)|i('d| would) (love|like) (a |that )?plan)\b/i.test(trimmed)) {
+    } else if (intent === "planning" || (input.isPostBrief && !input.plansVisible && /\b(plan|itinerary|schedule|day.by.day|show me (a |the )?plan|put together (a )?plan|yes (please|i (would|want))|yes.*(plan|itinerary)|i('d| would) (love|like) (a |that )?plan)\b/i.test(trimmed))) {
       decision = {
         intent: "planning",
         action: "show_plans",
-        answerMode: "text",
-        requiredService: "none",
-        memoryUpdates: {},
-        debugReason: "Post-brief plan request selected plan options.",
+        answerMode: "service",
+        requiredService: "plans",
+        memoryUpdates: { lastTopic: "planning", pendingFollowUp: undefined },
+        debugReason: "Post-brief planning request selected the canonical PlanService.",
       };
-    } else if (input.isPostBrief || direct || intent === "practical_information" || intent === "definition" || intent === "recommendation" || intent === "advice" || intent === "planning") {
+    } else if (input.isPostBrief || direct || intent === "practical_information" || intent === "definition" || intent === "recommendation" || intent === "advice") {
       decision = {
         intent,
         action: "retrieve_knowledge",
@@ -821,7 +833,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
         "gathering_evidence",
       ),
     };
-    const plan = await input.services.plans.generate(workingState.context, workingState.context.duration);
+    const requestedDuration = resolvePlanDuration(trimmed) ?? workingState.context.duration;
+    const plan = await input.services.plans.generate(workingState.context, requestedDuration);
     const messages = sanitizeAssistantMessages([{ type: "text" as const, text: plan.message }]);
     workingState = {
       ...workingState,
@@ -836,6 +849,44 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       updatedState: workingState,
       trace: decision.trace,
       decision,
+    };
+  }
+
+  if (decision.action === "resolve_destination_context") {
+    const destinationTask = createActiveTask(
+      workingState,
+      "destination_context",
+      "information",
+      trimmed,
+      "Answer a current destination calendar or operating-context question",
+      "gathering_evidence",
+    );
+    workingState = { ...workingState, activeTask: destinationTask };
+    const destinationContext = await input.services.destinationContext.resolve(trimmed, {
+      state: workingState,
+      now: input.now ?? new Date(),
+    });
+    const messages = sanitizeAssistantMessages([{ type: "text" as const, text: destinationContext.answer }]);
+    workingState = {
+      ...workingState,
+      activeTask: { ...destinationTask, status: "refinable" },
+      memory: {
+        ...workingState.memory,
+        lastTopic: "destination_context",
+        lastDestinationContext: destinationContext.reference ?? workingState.memory.lastDestinationContext,
+      },
+    };
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    return {
+      messages,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+      destinationContext: {
+        reference: destinationContext.reference,
+        destinationLocalTime: destinationContext.destinationLocalTime,
+        matchedFromMemory: destinationContext.matchedFromMemory,
+      },
     };
   }
 
@@ -895,7 +946,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
   }
 
   if (decision.action === "call_live_events") {
-    const now = new Date();
+    const now = input.now ?? new Date();
     const eventQuery = confirmedTomorrowFollowUp ? "tomorrow events on Koh Phangan" : trimmed;
     const resolvedEventRequest = createEventSearchRequest(eventQuery, now, {
       browserTimezone: input.clientContext?.browserTimezone,

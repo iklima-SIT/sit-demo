@@ -1185,3 +1185,168 @@ test("context-dependent discovery: non-connection wellness does not ask group co
   assert.equal(output.updatedState.context.groupCompositionAsked, false);
   assert.match(output.messages[0]!.text, /do you ride a scooter/i);
 });
+
+test("destination calendar: Buddha Day resolves in Bangkok time without using knowledge", async () => {
+  let knowledgeCalls = 0;
+  const services = createConversationServices({
+    knowledge: {
+      async search() {
+        knowledgeCalls += 1;
+        return { answer: "WRONG: ecstatic dance" };
+      },
+    },
+  });
+
+  const output = await runConversationTurn({
+    message: "Is it Buddha Day?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+    now: new Date("2026-07-28T18:30:00Z"),
+  });
+
+  assert.equal(knowledgeCalls, 0);
+  assert.equal(output.decision?.requiredService, "destination_context");
+  assert.match(output.messages[0]!.text, /Today.*Asalha Puja/i);
+  assert.match(output.messages[0]!.text, /Tomorrow.*Buddhist Lent/i);
+  assert.match(output.messages[0]!.text, /alcohol sales are prohibited.*midnight Thursday/i);
+  assert.equal(output.updatedState.memory.lastDestinationContext?.localDate, "2026-07-29");
+  assert.equal(output.updatedState.memory.onboardingPaused, true);
+});
+
+test("destination calendar: 'is it today' inherits Buddha Day instead of drifting to KB", async () => {
+  const now = new Date("2026-07-28T18:30:00Z");
+  const first = await runConversationTurn({
+    message: "Is it Buddha Day?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services: testServices(),
+    now,
+  });
+  const second = await runConversationTurn({
+    message: "Is it today?",
+    state: first.updatedState,
+    channel: "web",
+    services: testServices(),
+    now,
+  });
+
+  assert.equal(second.decision?.intent, "follow_up");
+  assert.equal(second.decision?.requiredService, "destination_context");
+  assert.equal(second.destinationContext?.matchedFromMemory, true);
+  assert.match(second.messages[0]!.text, /Today.*Asalha Puja/i);
+  assert.doesNotMatch(second.messages[0]!.text, /ecstatic dance|KNOWLEDGE:/i);
+});
+
+test("destination calendar: Buddhist Lent remains restricted through Thursday midnight", async () => {
+  const output = await runConversationTurn({
+    message: "Is today Buddha Day?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services: testServices(),
+    now: new Date("2026-07-30T05:00:00+07:00"),
+  });
+
+  assert.match(output.messages[0]!.text, /Today.*Buddhist Lent/i);
+  assert.match(output.messages[0]!.text, /midnight Thursday, 30 July/i);
+});
+
+test("destination calendar: non-holiday dates do not invent an alcohol restriction", async () => {
+  const output = await runConversationTurn({
+    message: "Is it Buddha Day?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services: testServices(),
+    now: new Date("2026-08-01T12:00:00+07:00"),
+  });
+
+  assert.match(output.messages[0]!.text, /don't have a verified Buddhist-holiday record/i);
+  assert.doesNotMatch(output.messages[0]!.text, /alcohol sales are prohibited/i);
+});
+
+test("destination calendar decisions are identical on Web and WhatsApp", async () => {
+  const now = new Date("2026-07-29T02:00:00+07:00");
+  const services = testServices();
+  const web = await runConversationTurn({
+    message: "Is it Buddha Day?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+    now,
+  });
+  const whatsapp = await runConversationTurn({
+    message: "Is it Buddha Day?",
+    state: createInitialConversationState(),
+    channel: "whatsapp",
+    services,
+    now,
+  });
+
+  assert.equal(web.decision?.intent, whatsapp.decision?.intent);
+  assert.equal(web.decision?.requiredService, whatsapp.decision?.requiredService);
+  assert.equal(web.messages[0]!.text, whatsapp.messages[0]!.text);
+  assert.equal(web.updatedState.memory.lastDestinationContext?.id, whatsapp.updatedState.memory.lastDestinationContext?.id);
+});
+
+function wellnessRestBriefState(): ConversationState {
+  const state = profileReadyState();
+  state.context.purpose = "wellness";
+  state.context.purposeDetail = "wellness-rest";
+  state.context.scooter = "learning";
+  state.context.sociability = "balanced";
+  state.context.briefGenerated = true;
+  state.memory.currentMode = "local_expert";
+  state.memory.onboardingStage = "complete";
+  state.memory.pendingFollowUp = "plan";
+  return state;
+}
+
+test("explicit 3-day request generates the plan instead of another option menu", async () => {
+  const output = await runConversationTurn({
+    message: "Yes please, 3 days",
+    state: wellnessRestBriefState(),
+    channel: "web",
+    services: testServices(),
+  });
+
+  assert.equal(output.decision?.intent, "planning");
+  assert.equal(output.decision?.requiredService, "plans");
+  assert.equal(output.planOptions?.length ?? 0, 0);
+  assert.match(output.messages[0]!.text, /3-day plan/i);
+  assert.match(output.messages[0]!.text, /Day 1.*Land softly/is);
+  assert.match(output.messages[0]!.text, /still getting comfortable on a scooter/i);
+  assert.doesNotMatch(output.messages[0]!.text, /Here are a few options/i);
+});
+
+test("a generic plan acceptance asks only for the duration", async () => {
+  const output = await runConversationTurn({
+    message: "Yes please",
+    state: wellnessRestBriefState(),
+    channel: "web",
+    services: testServices(),
+  });
+
+  assert.equal(output.decision?.requiredService, "plans");
+  assert.match(output.messages[0]!.text, /How much time/i);
+  assert.deepEqual(output.planOptions, ["3-Day Plan", "7-Day Plan", "1-Month Plan"]);
+});
+
+test("3-day planning output is identical on Web and WhatsApp", async () => {
+  const services = testServices();
+  const web = await runConversationTurn({
+    message: "3-Day Plan",
+    state: cloneState(wellnessRestBriefState()),
+    channel: "web",
+    services,
+  });
+  const whatsapp = await runConversationTurn({
+    message: "3-Day Plan",
+    state: cloneState(wellnessRestBriefState()),
+    channel: "whatsapp",
+    services,
+  });
+
+  assert.equal(web.decision?.requiredService, "plans");
+  assert.equal(web.messages[0]!.text, whatsapp.messages[0]!.text);
+  assert.deepEqual(web.updatedState.memory, whatsapp.updatedState.memory);
+});

@@ -4,6 +4,7 @@ import type { EventHumanNeed } from "./event-classification.js";
 
 export type Intent =
   | "live_event_search"
+  | "destination_context"
   | "location_request"
   | "practical_information"
   | "definition"
@@ -19,6 +20,7 @@ export type EngineAction =
   | "continue_onboarding"
   | "generate_brief"
   | "call_live_events"
+  | "resolve_destination_context"
   | "resolve_location"
   | "retrieve_knowledge"
   | "show_plans"
@@ -33,7 +35,7 @@ export type AnswerMode =
   | "fallback"
   | "none";
 
-export type RequiredService = "events" | "location" | "knowledge" | "none";
+export type RequiredService = "events" | "destination_context" | "location" | "knowledge" | "plans" | "none";
 
 export type ConversationChannel = "web" | "whatsapp" | "test";
 
@@ -117,6 +119,48 @@ export interface EventService {
   search(request: EventSearchRequest, context: EventSearchContext): Promise<EventSearchResult>;
 }
 
+export interface DestinationContextSource {
+  title: string;
+  url: string;
+  kind: "official" | "police_notice";
+}
+
+export interface AlcoholRestriction {
+  startTime: string;
+  endTime: string;
+  label: string;
+  exceptionsSummary: string;
+}
+
+export interface DestinationContextReference {
+  id: string;
+  destination: string;
+  timezone: string;
+  localDate: string;
+  name: string;
+  aliases: string[];
+  type: "religious_holiday";
+  alcoholRestriction?: AlcoholRestriction;
+  sources: DestinationContextSource[];
+  verifiedAt: string;
+}
+
+export interface DestinationContextSearchContext {
+  state: ConversationState;
+  now: Date;
+}
+
+export interface DestinationContextResult {
+  answer: string;
+  reference?: DestinationContextReference;
+  destinationLocalTime: string;
+  matchedFromMemory: boolean;
+}
+
+export interface DestinationContextService {
+  resolve(query: string, context: DestinationContextSearchContext): Promise<DestinationContextResult>;
+}
+
 export interface KnowledgeSearchContext {
   state: ConversationState;
   purpose?: string;
@@ -157,6 +201,7 @@ export interface PlanService {
 
 export interface ConversationServices {
   events: EventService;
+  destinationContext: DestinationContextService;
   knowledge: KnowledgeService;
   location: LocationService;
   plans: PlanService;
@@ -201,7 +246,7 @@ export interface EventReference {
   availableVenueReferences?: VenueLocationReference[];
 }
 
-export type ConversationTaskKind = "event_search" | "location" | "knowledge" | "planning";
+export type ConversationTaskKind = "event_search" | "destination_context" | "location" | "knowledge" | "planning";
 export type ConversationTaskStatus =
   | "gathering_evidence"
   | "awaiting_clarification"
@@ -263,6 +308,7 @@ export interface ConversationMemory {
   pendingUserRequest?: PendingUserRequest;
   lastArea?: string;
   lastTopic?: string;
+  lastDestinationContext?: DestinationContextReference;
   pendingFollowUp?: "event_tomorrow" | "event_narrow" | "plan";
   pendingEventFollowUp?: "tomorrow" | "narrow";
   lastTimeWindow?: TimeWindow;
@@ -282,6 +328,7 @@ export interface MemoryUpdates {
   pendingUserRequest?: PendingUserRequest;
   lastArea?: string;
   lastTopic?: string;
+  lastDestinationContext?: DestinationContextReference;
   pendingFollowUp?: ConversationMemory["pendingFollowUp"];
   pendingEventFollowUp?: ConversationMemory["pendingEventFollowUp"];
   lastTimeWindow?: TimeWindow;
@@ -332,6 +379,7 @@ export interface RunConversationTurnInput {
   channel: ConversationChannel;
   services: ConversationServices;
   devTrace?: boolean;
+  now?: Date;
   clientContext?: {
     browserTimezone?: string;
   };
@@ -356,6 +404,11 @@ export interface RunConversationTurnOutput {
     providerQueryWindow?: string;
     rejectedCandidates?: NonNullable<EventSearchResult["rejectedCandidates"]>;
     diagnostics?: EventSearchDiagnostics;
+  };
+  destinationContext?: {
+    reference?: DestinationContextReference;
+    destinationLocalTime: string;
+    matchedFromMemory: boolean;
   };
 }
 

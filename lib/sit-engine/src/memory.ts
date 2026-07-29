@@ -59,5 +59,6 @@ export function getMemoryTrace(text: string, memory: ConversationMemory): string
   if (memory.originalRequest) used.push("originalRequest");
   if (memory.onboardingPaused) used.push("onboardingPaused");
   if (memory.lastTopic) used.push("lastTopic");
+  if (memory.lastDestinationContext) used.push("lastDestinationContext");
   return used;
 }

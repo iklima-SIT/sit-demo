@@ -104,3 +104,54 @@ test("developer trace includes decision reason without changing the decision", (
   assert.equal(decision.trace?.serviceSelected, "events");
   assert.equal(decision.trace?.onboardingTriggered, false);
 });
+
+test("Buddha Day is current destination context, not generic knowledge", () => {
+  const decision = decideAssistantAction({
+    userMessage: "Is it Buddha Day?",
+    context: INITIAL_CTX,
+    memory: {},
+  });
+
+  assert.equal(decision.intent, "destination_context");
+  assert.equal(decision.action, "resolve_destination_context");
+  assert.equal(decision.requiredService, "destination_context");
+  assert.notEqual(decision.action, "continue_onboarding");
+});
+
+test("short date confirmation follows the active destination context", () => {
+  const memory: ConversationMemory = {
+    lastTopic: "destination_context",
+    lastDestinationContext: {
+      id: "th-2026-asalha-puja",
+      destination: "Koh Phangan",
+      timezone: "Asia/Bangkok",
+      localDate: "2026-07-29",
+      name: "Asalha Puja Day (Asanha Bucha)",
+      aliases: ["Buddha Day"],
+      type: "religious_holiday",
+      sources: [],
+      verifiedAt: "2026-07-29",
+    },
+  };
+
+  const decision = decideAssistantAction({
+    userMessage: "Is it today?",
+    context: INITIAL_CTX,
+    memory,
+  });
+
+  assert.equal(decision.intent, "follow_up");
+  assert.equal(decision.requiredService, "destination_context");
+});
+
+test("an explicit itinerary request selects PlanService", () => {
+  const decision = decideAssistantAction({
+    userMessage: "Build me a 3-day plan",
+    context: INITIAL_CTX,
+    memory: {},
+  });
+
+  assert.equal(decision.intent, "planning");
+  assert.equal(decision.action, "show_plans");
+  assert.equal(decision.requiredService, "plans");
+});

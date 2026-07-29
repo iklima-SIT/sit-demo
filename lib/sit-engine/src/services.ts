@@ -1,10 +1,13 @@
 import type {
   ConversationServices,
+  DestinationContextService,
   EventService,
   KnowledgeService,
   LocationService,
   PlanService,
 } from "./types.js";
+import { createDestinationContextService as createStaticDestinationContextService } from "./destination-context.js";
+import { createStaticPlanService } from "./plans.js";
 import type { KBCard } from "./knowledge.js";
 import { buildExpertAnswer, searchKBWithScore } from "./knowledge.js";
 import {
@@ -106,14 +109,7 @@ export function createStaticLocationService(): LocationService {
 }
 
 export function createPlaceholderPlanService(): PlanService {
-  return {
-    async generate() {
-      return {
-        message: "Here are a few options:",
-        options: ["3-Day Plan", "7-Day Plan", "1-Month Plan"],
-      };
-    },
-  };
+  return createStaticPlanService();
 }
 
 export function createFallbackEventService(): EventService {
@@ -124,9 +120,14 @@ export function createFallbackEventService(): EventService {
   };
 }
 
+export function createDestinationContextService(): DestinationContextService {
+  return createStaticDestinationContextService();
+}
+
 export function createConversationServices(overrides: Partial<ConversationServices> & { knowledgeCards?: KBCard[] } = {}): ConversationServices {
   return {
     events: overrides.events ?? createFallbackEventService(),
+    destinationContext: overrides.destinationContext ?? createDestinationContextService(),
     knowledge: overrides.knowledge ?? createKnowledgeService(overrides.knowledgeCards ?? []),
     location: overrides.location ?? createStaticLocationService(),
     plans: overrides.plans ?? createPlaceholderPlanService(),

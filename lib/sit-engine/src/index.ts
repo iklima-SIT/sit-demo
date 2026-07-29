@@ -11,6 +11,12 @@ export type {
   ConversationTaskKind,
   ConversationTaskStatus,
   DeveloperTrace,
+  DestinationContextReference,
+  DestinationContextResult,
+  DestinationContextSearchContext,
+  DestinationContextService,
+  DestinationContextSource,
+  AlcoholRestriction,
   EngineAction,
   EventSearchContext,
   EventSearchResult,
@@ -60,6 +66,7 @@ export {
 } from "./conversation.js";
 export {
   createConversationServices,
+  createDestinationContextService,
   createFallbackEventService,
   createKnowledgeService,
   createPlaceholderPlanService,
@@ -71,6 +78,8 @@ export {
   isAdviceRequest,
   isAffirmative,
   isDefinitionQuestion,
+  isDestinationContextFollowUp,
+  isDestinationContextRequest,
   isDirectQuestion,
   isDateFollowUp,
   isEventBroadeningRequest,
@@ -83,6 +92,14 @@ export {
   isRecommendationRequest,
   isTomorrowEventQuery,
 } from "./intent-router.js";
+export {
+  KOH_PHANGAN_DESTINATION_CALENDAR,
+} from "./destination-context.js";
+export {
+  createStaticPlanService,
+  resolvePlanDuration,
+  type PlanDuration,
+} from "./plans.js";
 export {
   INITIAL_MEMORY,
   applyMemoryUpdates,

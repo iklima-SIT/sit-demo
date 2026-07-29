@@ -9,6 +9,7 @@ import type {
 
 export type DeveloperServiceName =
   | "EventService"
+  | "DestinationContextService"
   | "KnowledgeService"
   | "LocationService"
   | "PlanService"
@@ -34,6 +35,7 @@ export interface DeveloperConsolePayload {
     lastEvent?: unknown;
     lastArea?: string;
     lastTopic?: string;
+    lastDestinationContext?: unknown;
     userProfile?: unknown;
     onboardingStage?: string;
     lastTimeWindow?: unknown;
@@ -119,6 +121,7 @@ export interface DeveloperConsolePayload {
 
 const SERVICE_NAMES: DeveloperServiceName[] = [
   "EventService",
+  "DestinationContextService",
   "KnowledgeService",
   "LocationService",
   "PlanService",
@@ -192,6 +195,13 @@ export function createDeveloperConsoleRecorder(services: ConversationServices): 
       events: {
         search: (query, context) => measure("EventService", () => services.events.search(query, context), result => result.fallback || !result.response),
       },
+      destinationContext: {
+        resolve: (query, context) => measure(
+          "DestinationContextService",
+          () => services.destinationContext.resolve(query, context),
+          result => !result.reference,
+        ),
+      },
       knowledge: {
         search: (query, context) => measure("KnowledgeService", () => services.knowledge.search(query, context), result => !result.answer),
       },
@@ -231,6 +241,7 @@ export function buildDeveloperConsolePayload(input: {
       lastEvent: memory.lastEvent,
       lastArea: memory.lastArea,
       lastTopic: memory.lastTopic,
+      lastDestinationContext: memory.lastDestinationContext,
       userProfile: memory.userProfile,
       onboardingStage: memory.onboardingStage,
       lastTimeWindow: memory.lastTimeWindow,
@@ -238,9 +249,12 @@ export function buildDeveloperConsolePayload(input: {
       lastTemporalExpression: memory.lastTemporalExpression,
     },
     timeTrace: {
-      destination: input.output.event?.diagnostics?.destination,
-      destinationTimezone: input.output.event?.diagnostics?.destinationTimezone,
-      destinationCurrentTime: input.output.event?.diagnostics?.destinationCurrentTime,
+      destination: input.output.event?.diagnostics?.destination
+        ?? input.output.destinationContext?.reference?.destination,
+      destinationTimezone: input.output.event?.diagnostics?.destinationTimezone
+        ?? input.output.destinationContext?.reference?.timezone,
+      destinationCurrentTime: input.output.event?.diagnostics?.destinationCurrentTime
+        ?? input.output.destinationContext?.destinationLocalTime,
       browserTimezone: input.output.event?.diagnostics?.browserTimezone,
       filteringCutoff: input.output.event?.diagnostics?.filteringCutoff,
       originalTemporalExpression: input.output.event?.originalTemporalText ?? memory.lastTemporalExpression,

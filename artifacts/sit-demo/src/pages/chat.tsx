@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bug, Database, Download, Send, Upload, X } from "lucide-react";
-import { useLocation } from "wouter";
 import type { KeyboardEvent, ChangeEvent } from "react";
 import type { ConversationState } from "@workspace/sit-engine";
 import {
@@ -226,7 +225,6 @@ function DeveloperConsole({
 // ─── Chat Screen ──────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
-  const [, setLocation] = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string>("");
   const [isTyping, setIsTyping] = useState(false);
@@ -608,7 +606,7 @@ export default function ChatScreen() {
                 <button
                   key={plan}
                   data-testid={`plan-${plan}`}
-                  onClick={() => setLocation("/tagline")}
+                  onClick={() => handleSend(plan)}
                   className="w-full py-3.5 px-5 rounded-xl border border-primary/20 text-white/85 font-medium hover:bg-primary/10 hover:border-primary/35 hover:text-white active:scale-[0.98] transition-all flex items-center justify-between text-[14px]"
                   style={{ background: "hsl(250 80% 60% / 0.07)" }}
                 >
