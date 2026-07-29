@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActiveConversationTask,
   AssistantDecision,
   ConversationMemory,
   ConversationState,
@@ -14,17 +15,19 @@ import type {
   RunConversationTurnInput,
   RunConversationTurnOutput,
   UserRequestContext,
+  UserRequestMode,
   UserContext,
   SITResponse,
   SITBrief,
 } from "./types.js";
 import { INITIAL_CTX } from "./types.js";
-import { classifyIntent, isDirectQuestion, isEventBroadeningRequest, isTomorrowEventQuery } from "./intent-router.js";
+import { classifyIntent, isDateFollowUp, isDirectQuestion, isEventBroadeningRequest, isTomorrowEventQuery } from "./intent-router.js";
 import { applyMemoryUpdates, getMemoryTrace, isEventNarrowFollowUp, isEventTomorrowFollowUp, rememberVenueFromAssistantText, resolveVenueReference } from "./memory.js";
 import { buildEventFallback, buildHonestFallback } from "./knowledge.js";
 import { createEventSearchRequest, hasExplicitEventTimeExpression, resolveEventFilteringCutoff, type EventSearchRequest } from "./time-resolver.js";
 import type { EventSearchFilters } from "./event-filters.js";
 import { sanitizeAssistantMessages } from "./customer-output.js";
+import { extractLocationSubject } from "./venues.js";
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
 
@@ -533,6 +536,114 @@ function clearPendingUserRequest(memory: ConversationMemory): ConversationMemory
   return rest;
 }
 
+function createActiveTask(
+  state: ConversationState,
+  kind: ActiveConversationTask["kind"],
+  mode: UserRequestMode,
+  originalMessage: string,
+  objective: string,
+  status: ActiveConversationTask["status"],
+): ActiveConversationTask {
+  const userTurnCount = state.turns.filter(turn => turn.role === "user").length;
+  return {
+    id: `task-${userTurnCount}-${kind}`,
+    kind,
+    mode,
+    originalMessage,
+    objective,
+    status,
+  };
+}
+
+function isContractDecline(text: string): boolean {
+  return /^(?:i\s+)?(?:don'?t know|do not know|not sure|never mind|nevermind|cancel|skip|no idea)[.!]?$/i.test(text.trim());
+}
+
+function canFulfilVenueContract(text: string): boolean {
+  if (isContractDecline(text) || isDateFollowUp(text)) return false;
+  if (/^(?:yes|no|okay|ok|sure|please|thanks?|thank you)[.!]?$/i.test(text.trim())) return false;
+  return Boolean(extractLocationSubject(text, true));
+}
+
+function resolveActiveContract(
+  message: string,
+  state: ConversationState,
+  devTrace: boolean | undefined,
+): AssistantDecision | undefined {
+  const task = state.activeTask;
+  const contract = task?.contract;
+  if (!task || !contract) return undefined;
+
+  const globalIntent = classifyIntent(message, state.memory);
+  const startsNewObjective = globalIntent !== "general_chat"
+    && globalIntent !== "location_request";
+  if (startsNewObjective) return undefined;
+
+  if (isContractDecline(message)) {
+    const decision: AssistantDecision = {
+      intent: "follow_up",
+      action: "acknowledge",
+      answerMode: "text",
+      requiredService: "none",
+      memoryUpdates: {},
+      debugReason: `Traveler declined the active ${contract.expectedAnswer} conversation contract.`,
+    };
+    if (devTrace) {
+      decision.trace = {
+        ...buildTrace(message, state.memory, decision, false),
+        memoryUsed: [...getMemoryTrace(message, state.memory), "activeTask.contract"],
+      };
+    }
+    return decision;
+  }
+
+  if (contract.expectedAnswer === "venue" && canFulfilVenueContract(message)) {
+    const onboardingIncomplete = !state.context.briefGenerated && state.memory.onboardingStage !== "complete";
+    const decision: AssistantDecision = {
+      intent: "location_request",
+      action: "resolve_location",
+      answerMode: "service",
+      requiredService: "location",
+      memoryUpdates: {
+        currentMode: "information",
+        onboardingPaused: onboardingIncomplete,
+      },
+      debugReason: "Consumed the message as the venue answer required by the active location contract.",
+    };
+    if (devTrace) {
+      decision.trace = {
+        ...buildTrace(message, state.memory, decision, false),
+        memoryUsed: [...getMemoryTrace(message, state.memory), "activeTask.contract"],
+      };
+    }
+    return decision;
+  }
+
+  if (contract.expectedAnswer === "venue") {
+    const onboardingIncomplete = !state.context.briefGenerated && state.memory.onboardingStage !== "complete";
+    const decision: AssistantDecision = {
+      intent: "location_request",
+      action: "resolve_location",
+      answerMode: "service",
+      requiredService: "location",
+      memoryUpdates: {
+        currentMode: "information",
+        onboardingPaused: onboardingIncomplete,
+      },
+      debugReason: "Kept the active venue contract open because the reply did not identify a venue or start a new objective.",
+    };
+    if (devTrace) {
+      decision.trace = {
+        ...buildTrace(message, state.memory, decision, false),
+        memoryUsed: [...getMemoryTrace(message, state.memory), "activeTask.contract"],
+      };
+    }
+    return decision;
+  }
+
+  return undefined;
+}
+
 export async function runConversationTurn(input: RunConversationTurnInput): Promise<RunConversationTurnOutput> {
   const trimmed = input.message.trim();
   if (!trimmed && input.state.turns.length === 0) {
@@ -563,7 +674,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
   };
   const confirmedTomorrowFollowUp = isEventTomorrowFollowUp(trimmed, workingState.memory);
   const broadensEventSearch = isEventBroadeningRequest(trimmed);
-  const decision = decideAssistantAction({
+  const contractDecision = resolveActiveContract(trimmed, workingState, input.devTrace);
+  const decision = contractDecision ?? decideAssistantAction({
     userMessage: trimmed,
     context: workingState.context,
     memory: workingState.memory,
@@ -576,9 +688,46 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     memory: applyMemoryUpdates(workingState.memory, decision.memoryUpdates),
   };
 
+  if (decision.action === "acknowledge") {
+    const messages = sanitizeAssistantMessages([{
+      type: "text" as const,
+      text: "No problem. Tell me the venue whenever you have it.",
+    }]);
+    workingState = {
+      ...workingState,
+      activeTask: workingState.activeTask
+        ? { ...workingState.activeTask, status: "abandoned", contract: undefined }
+        : undefined,
+    };
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    return {
+      messages,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+    };
+  }
+
   if (decision.action === "show_plans") {
+    workingState = {
+      ...workingState,
+      activeTask: createActiveTask(
+        workingState,
+        "planning",
+        "decision",
+        trimmed,
+        "Build a plan for the traveler",
+        "gathering_evidence",
+      ),
+    };
     const plan = await input.services.plans.generate(workingState.context, workingState.context.duration);
     const messages = sanitizeAssistantMessages([{ type: "text" as const, text: plan.message }]);
+    workingState = {
+      ...workingState,
+      activeTask: workingState.activeTask
+        ? { ...workingState.activeTask, status: "refinable" }
+        : undefined,
+    };
     workingState = appendAssistantMessages(workingState, messages, decision);
     return {
       messages,
@@ -590,13 +739,47 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
   }
 
   if (decision.action === "resolve_location") {
+    const locationTask = contractDecision && workingState.activeTask?.kind === "location"
+      ? workingState.activeTask
+      : createActiveTask(
+          workingState,
+          "location",
+          "information",
+          trimmed,
+          "Provide a venue location",
+          "gathering_evidence",
+        );
+    workingState = { ...workingState, activeTask: locationTask };
     const location = await input.services.location.resolve(trimmed, workingState.memory);
     const messages = sanitizeAssistantMessages([{ type: "text" as const, text: location.answer }]);
+    const needsClarification = location.outcome === "needs_clarification";
+    const lastVenueReference = !needsClarification && location.venueId && location.venueName && location.googleMapsUrl
+      ? {
+          id: location.venueId,
+          name: location.venueName,
+          aliases: [location.venueName],
+          area: location.area,
+          googleMapsUrl: location.googleMapsUrl,
+        }
+      : workingState.memory.lastVenueReference;
     workingState = {
       ...workingState,
+      activeTask: {
+        ...locationTask,
+        status: needsClarification ? "awaiting_clarification" : "refinable",
+        contract: needsClarification
+          ? {
+              expectedAnswer: "venue",
+              reason: "A venue name is required before SIT can provide a location.",
+              mode: "information",
+              createdFromAction: "resolve_location",
+            }
+          : undefined,
+      },
       memory: {
         ...workingState.memory,
         lastVenue: location.venueId ?? workingState.memory.lastVenue,
+        lastVenueReference,
         lastArea: location.area ?? workingState.memory.lastArea,
       },
     };
@@ -644,6 +827,16 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       : workingState.memory.originalRequest ?? requestContext;
     workingState = {
       ...workingState,
+      activeTask: decision.intent === "follow_up" && workingState.activeTask?.kind === "event_search"
+        ? { ...workingState.activeTask, status: "gathering_evidence", contract: undefined }
+        : createActiveTask(
+            workingState,
+            "event_search",
+            requestContext.requestMode,
+            trimmed,
+            "Find events matching the traveler's explicit constraints",
+            "gathering_evidence",
+          ),
       memory: {
         ...workingState.memory,
         originalRequest: storedOriginalRequest,
@@ -662,6 +855,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const messages = sanitizeAssistantMessages([{ type: "text" as const, text }]);
     workingState = {
       ...workingState,
+      activeTask: workingState.activeTask
+        ? { ...workingState.activeTask, status: "refinable", contract: undefined }
+        : undefined,
       memory: {
         ...clearPendingUserRequest(workingState.memory),
         lastTopic: "events",
@@ -677,6 +873,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
           query: eventRequest.queryText,
           timeWindow: eventRequest.timeWindow,
           filters: eventRequest.filters,
+          venueReferences: eventResult.venueReferences,
         },
       },
     };
@@ -697,6 +894,20 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
   }
 
   if (decision.action === "retrieve_knowledge") {
+    const knowledgeMode: UserRequestMode = decision.intent === "recommendation" || decision.intent === "advice"
+      ? "decision"
+      : "information";
+    workingState = {
+      ...workingState,
+      activeTask: createActiveTask(
+        workingState,
+        "knowledge",
+        knowledgeMode,
+        trimmed,
+        knowledgeMode === "decision" ? "Help the traveler make a decision" : "Answer the traveler's factual question",
+        "gathering_evidence",
+      ),
+    };
     const knowledge = await input.services.knowledge.search(trimmed, {
       state: workingState,
       purpose: workingState.context.purpose,
@@ -705,6 +916,12 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       type: "text" as const,
       text: knowledge.answer ?? buildHonestFallback(trimmed),
     }]);
+    workingState = {
+      ...workingState,
+      activeTask: workingState.activeTask
+        ? { ...workingState.activeTask, status: "completed", contract: undefined }
+        : undefined,
+    };
     workingState = appendAssistantMessages(workingState, messages, decision);
     workingState = applyAssistantTextMemory(workingState, messages);
     return {

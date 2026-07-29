@@ -196,7 +196,11 @@ export function createDeveloperConsoleRecorder(services: ConversationServices): 
         search: (query, context) => measure("KnowledgeService", () => services.knowledge.search(query, context), result => !result.answer),
       },
       location: {
-        resolve: (query, memory) => measure("LocationService", () => services.location.resolve(query, memory), () => false),
+        resolve: (query, memory) => measure(
+          "LocationService",
+          () => services.location.resolve(query, memory),
+          result => result.outcome === "needs_clarification",
+        ),
       },
       plans: {
         generate: (profile, duration) => measure("PlanService", () => services.plans.generate(profile, duration), () => false),

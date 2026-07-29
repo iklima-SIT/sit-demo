@@ -7,7 +7,17 @@ import type {
 } from "./types.js";
 import type { KBCard } from "./knowledge.js";
 import { buildExpertAnswer, searchKBWithScore } from "./knowledge.js";
-import { buildLocationAnswer, extractVenueFromText, getVenueByReference } from "./venues.js";
+import {
+  buildLocationAnswer,
+  buildVenueGoogleMapsSearchUrl,
+  extractLocationSubject,
+  extractVenueFromText,
+  findVenueLocationReference,
+  formatVenueLocationReference,
+  formatVenueSearchLocation,
+  formatVenueCard,
+  getVenueByReference,
+} from "./venues.js";
 
 export function createKnowledgeService(kb: KBCard[]): KnowledgeService {
   return {
@@ -32,10 +42,48 @@ export function createStaticLocationService(): LocationService {
     async resolve(query, memory) {
       const venueId = extractVenueFromText(query) ?? memory.lastVenue;
       const venue = venueId ? getVenueByReference(venueId) : undefined;
+      if (venue) {
+        return {
+          answer: formatVenueCard(venue),
+          outcome: "resolved",
+          venueId: venue.id,
+          venueName: venue.name,
+          area: venue.area,
+          googleMapsUrl: venue.googleMapsUrl,
+        };
+      }
+
+      const recentVenueReferences = memory.lastVenueReference
+        ? [memory.lastVenueReference, ...(memory.lastEvent?.venueReferences ?? [])]
+        : memory.lastEvent?.venueReferences;
+      const eventVenue = findVenueLocationReference(venueId ?? query, recentVenueReferences);
+      if (eventVenue) {
+        return {
+          answer: formatVenueLocationReference(eventVenue),
+          outcome: "resolved",
+          venueId: eventVenue.id,
+          venueName: eventVenue.name,
+          area: eventVenue.area,
+          googleMapsUrl: eventVenue.googleMapsUrl,
+        };
+      }
+
+      const subject = extractLocationSubject(query, true);
+      if (subject) {
+        const dynamicId = subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        const googleMapsUrl = buildVenueGoogleMapsSearchUrl(subject);
+        return {
+          answer: formatVenueSearchLocation(subject),
+          outcome: "resolved",
+          venueId: dynamicId || undefined,
+          venueName: subject,
+          googleMapsUrl,
+        };
+      }
+
       return {
         answer: buildLocationAnswer(venueId ? `where is ${venueId}` : query),
-        venueId,
-        area: venue?.area,
+        outcome: "needs_clarification",
       };
     },
   };

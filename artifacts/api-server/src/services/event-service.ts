@@ -12,6 +12,7 @@ import {
   sanitizeCustomerFacingText,
   type EventClassification,
   type PrimaryExperience,
+  type VenueLocationReference,
 } from "@workspace/sit-engine";
 import {
   TODO_TODAY_HOME_URL,
@@ -194,6 +195,7 @@ export interface LiveEventSearchResult {
   response: string | null;
   fallback: boolean;
   sources: string[];
+  venueReferences?: VenueLocationReference[];
   queryUsed: string;
   timeWindow: NormalizedEventTimeWindow;
   fallbackMessage?: string;
@@ -680,6 +682,34 @@ function mergeEvents(sourceResults: SourceResult[]): { events: MergedEvent[]; du
     events: [...byKey.values()].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()),
     duplicatesRemoved,
   };
+}
+
+function buildVenueLocationReferences(events: MergedEvent[]): VenueLocationReference[] {
+  const references = new Map<string, VenueLocationReference>();
+
+  for (const event of events) {
+    const name = event.venue.trim();
+    if (!name) continue;
+    const normalizedName = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const [venueName, ...areaParts] = name.split(",").map(part => part.trim()).filter(Boolean);
+    const canonicalName = venueName || name;
+    const id = canonicalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const existing = references.get(normalizedName);
+    const googleMapsUrl = event.googleMapsUrl
+      ?? existing?.googleMapsUrl
+      ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${canonicalName} Koh Phangan`)}`;
+
+    references.set(normalizedName, {
+      id,
+      name: canonicalName,
+      aliases: Array.from(new Set([canonicalName, name, ...(existing?.aliases ?? [])])),
+      area: areaParts.join(", ") || existing?.area,
+      googleMapsUrl,
+      sourceUrl: event.sourceLinks[0] ?? existing?.sourceUrl,
+    });
+  }
+
+  return [...references.values()];
 }
 
 function formatEventTimeRange(event: CalendarEvent): string {
@@ -1229,6 +1259,7 @@ export async function searchLiveEvents(input: EventSearchRequest, apiKey?: strin
       response: formatted.response,
       fallback: false,
       sources: Array.from(new Set(events.flatMap(event => event.sourceLinks))),
+      venueReferences: buildVenueLocationReferences(events),
       queryUsed: `approved source aggregation for ${input.timeWindow.label}`,
       timeWindow: input.timeWindow,
       rawResponse: { sourceResults, mergedEvents, filteredEvents: events },

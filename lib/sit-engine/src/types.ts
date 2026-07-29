@@ -51,6 +51,7 @@ export interface EventSearchResult {
   response: string | null;
   fallback: boolean;
   sources?: string[];
+  venueReferences?: VenueLocationReference[];
   fallbackMessage?: string;
   timeWindow?: TimeWindow;
   rejectedCandidates?: Array<{
@@ -132,8 +133,11 @@ export interface KnowledgeService {
 
 export interface LocationResult {
   answer: string;
+  outcome?: "resolved" | "needs_clarification";
   venueId?: string;
+  venueName?: string;
   area?: string;
+  googleMapsUrl?: string;
 }
 
 export interface LocationService {
@@ -162,11 +166,47 @@ export interface VenueReference {
   source: "user" | "memory" | "assistant";
 }
 
+export interface VenueLocationReference {
+  id: string;
+  name: string;
+  aliases?: string[];
+  area?: string;
+  googleMapsUrl: string;
+  sourceUrl?: string;
+}
+
 export interface EventReference {
   scope: "tonight" | "tomorrow" | "narrow";
   query: string;
   timeWindow?: TimeWindow;
   filters?: EventSearchFilters;
+  venueReferences?: VenueLocationReference[];
+}
+
+export type ConversationTaskKind = "event_search" | "location" | "knowledge" | "planning";
+export type ConversationTaskStatus =
+  | "gathering_evidence"
+  | "awaiting_clarification"
+  | "responding"
+  | "refinable"
+  | "completed"
+  | "abandoned";
+
+export interface ConversationContract {
+  expectedAnswer: "venue" | "date" | "area" | "event";
+  reason: string;
+  mode: UserRequestMode;
+  createdFromAction: EngineAction;
+}
+
+export interface ActiveConversationTask {
+  id: string;
+  kind: ConversationTaskKind;
+  objective: string;
+  mode: UserRequestMode;
+  originalMessage: string;
+  status: ConversationTaskStatus;
+  contract?: ConversationContract;
 }
 
 export type UserRequestMode = "information" | "decision";
@@ -198,6 +238,7 @@ export interface KnowledgeReference {
 
 export interface ConversationMemory {
   lastVenue?: string;
+  lastVenueReference?: VenueLocationReference;
   lastEvent?: EventReference;
   originalRequest?: UserRequestContext;
   pendingUserRequest?: PendingUserRequest;
@@ -216,6 +257,7 @@ export interface ConversationMemory {
 
 export interface MemoryUpdates {
   lastVenue?: string;
+  lastVenueReference?: VenueLocationReference;
   lastEvent?: EventReference;
   originalRequest?: UserRequestContext;
   pendingUserRequest?: PendingUserRequest;
@@ -262,6 +304,7 @@ export interface ConversationState {
   context: UserContext;
   memory: ConversationMemory;
   turns: ConversationTurn[];
+  activeTask?: ActiveConversationTask;
 }
 
 export interface RunConversationTurnInput {

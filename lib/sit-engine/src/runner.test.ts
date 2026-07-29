@@ -192,6 +192,145 @@ test("pending onboarding pauses for a location request and preserves progress", 
   assert.doesNotMatch(bareVenue.messages[0]!.text, /Nice to meet you|how old/i);
 });
 
+test("event venue references survive the event turn and resolve an exact location follow-up", async () => {
+  const services = createConversationServices({
+    events: {
+      async search() {
+        return {
+          response: "Yin Yoga & Sound Healing — Sabai Yin Yogashala",
+          fallback: false,
+          venueReferences: [{
+            id: "sabai-yin-yogashala",
+            name: "Sabai Yin Yogashala",
+            aliases: ["Sabai Yin YogaShala"],
+            area: "Sri Thanu",
+            googleMapsUrl: "https://maps.example/sabai-yin-yogashala",
+            sourceUrl: "https://todo.today/example",
+          }],
+        };
+      },
+    },
+  });
+
+  const events = await runConversationTurn({
+    message: "Show me yoga events tomorrow",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const location = await runConversationTurn({
+    message: "Where is the location of Sabai Yin YogaShala?",
+    state: events.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(location.decision?.intent, "location_request");
+  assert.equal(location.decision?.requiredService, "location");
+  assert.match(location.messages[0]!.text, /Sabai Yin Yogashala/);
+  assert.match(location.messages[0]!.text, /https:\/\/maps\.example\/sabai-yin-yogashala/);
+  assert.equal(location.updatedState.memory.lastVenueReference?.name, "Sabai Yin Yogashala");
+  assert.equal(location.updatedState.activeTask?.kind, "location");
+  assert.equal(location.updatedState.activeTask?.status, "refinable");
+  assert.equal(location.updatedState.activeTask?.contract, undefined);
+});
+
+test("an explicitly named venue returns a Maps search instead of asking for the venue again", async () => {
+  const output = await runConversationTurn({
+    message: "Where is Arcana?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services: testServices(),
+  });
+
+  assert.equal(output.decision?.intent, "location_request");
+  assert.match(output.messages[0]!.text, /Arcana/);
+  assert.match(output.messages[0]!.text, /google\.com\/maps\/search/);
+  assert.doesNotMatch(output.messages[0]!.text, /Which place/i);
+  assert.equal(output.updatedState.activeTask?.status, "refinable");
+});
+
+test("a missing venue creates a blocking contract that consumes the next venue answer", async () => {
+  const services = testServices();
+  const clarification = await runConversationTurn({
+    message: "Send me the location",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+
+  assert.match(clarification.messages[0]!.text, /Which place/i);
+  assert.equal(clarification.updatedState.activeTask?.kind, "location");
+  assert.equal(clarification.updatedState.activeTask?.status, "awaiting_clarification");
+  assert.equal(clarification.updatedState.activeTask?.contract?.expectedAnswer, "venue");
+
+  const answer = await runConversationTurn({
+    message: "Sabai Yin YogaShala",
+    state: clarification.updatedState,
+    channel: "web",
+    services,
+    devTrace: true,
+  });
+
+  assert.equal(answer.decision?.intent, "location_request");
+  assert.equal(answer.decision?.requiredService, "location");
+  assert.match(answer.decision?.debugReason ?? "", /active location contract/i);
+  assert.match(answer.messages[0]!.text, /Sabai Yin YogaShala/);
+  assert.match(answer.messages[0]!.text, /google\.com\/maps\/search/);
+  assert.doesNotMatch(answer.messages[0]!.text, /KNOWLEDGE:|Nice to meet you|how old/i);
+  assert.equal(answer.updatedState.activeTask?.status, "refinable");
+  assert.equal(answer.updatedState.activeTask?.contract, undefined);
+});
+
+test("a direct event request supersedes an unresolved location contract", async () => {
+  const services = testServices();
+  const clarification = await runConversationTurn({
+    message: "Send me the location",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const replacement = await runConversationTurn({
+    message: "What's happening tonight?",
+    state: clarification.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(replacement.decision?.intent, "live_event_search");
+  assert.equal(replacement.decision?.requiredService, "events");
+  assert.match(replacement.messages[0]!.text, /EVENT:/);
+  assert.equal(replacement.updatedState.activeTask?.kind, "event_search");
+  assert.equal(replacement.updatedState.activeTask?.contract, undefined);
+});
+
+test("web and WhatsApp consume the same venue contract through the canonical runner", async () => {
+  const services = testServices();
+  const clarification = await runConversationTurn({
+    message: "Send me the location",
+    state: createInitialConversationState(),
+    channel: "test",
+    services,
+  });
+  const web = await runConversationTurn({
+    message: "Sabai Yin YogaShala",
+    state: cloneState(clarification.updatedState),
+    channel: "web",
+    services,
+  });
+  const whatsapp = await runConversationTurn({
+    message: "Sabai Yin YogaShala",
+    state: cloneState(clarification.updatedState),
+    channel: "whatsapp",
+    services,
+  });
+
+  assert.equal(web.decision?.intent, whatsapp.decision?.intent);
+  assert.equal(web.decision?.requiredService, whatsapp.decision?.requiredService);
+  assert.equal(web.messages[0]!.text, whatsapp.messages[0]!.text);
+  assert.deepEqual(web.updatedState.activeTask, whatsapp.updatedState.activeTask);
+});
+
 test("pending onboarding pauses for an opening-hours request", async () => {
   const state = createInitialConversationState();
   state.context.firstNameAsked = true;

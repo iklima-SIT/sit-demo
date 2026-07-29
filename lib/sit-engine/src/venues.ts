@@ -1,3 +1,5 @@
+import type { VenueLocationReference } from "./types.js";
+
 export interface VenueData {
   id: string;
   name: string;
@@ -188,7 +190,88 @@ export function extractVenueFromText(text: string): string | undefined {
 }
 
 export function getVenueByReference(reference: string): VenueData | undefined {
-  return VENUE_DB[reference.toLowerCase()];
+  const normalized = reference.toLowerCase();
+  return VENUE_DB[normalized] ?? VENUES.find(venue => venue.id === normalized);
+}
+
+function normalizeVenueText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function cleanLocationSubject(value: string): string | undefined {
+  const cleaned = value
+    .trim()
+    .replace(/[?.!,]+$/g, "")
+    .replace(/\s+(?:in|on)\s+koh\s+phangan$/i, "")
+    .trim();
+  if (!cleaned || /^(it|there|that|that one|this one|the place|the venue|send(?: me)?(?: the)?|share(?: the)?|give(?: me)?(?: the)?)$/i.test(cleaned)) return undefined;
+  return cleaned;
+}
+
+export function extractLocationSubject(text: string, allowBare = false): string | undefined {
+  const trimmed = text.trim();
+  const patterns = [
+    /^where(?:\s+is|'s)\s+(?:the\s+)?(?:location\s+(?:of|for)\s+)?(.+)$/i,
+    /^(?:i\s+(?:want|need)\s+)?(?:the\s+)?(?:location(?:\s+pin)?|pin|address|google\s+maps?)\s+(?:for|of|to)\s+(.+)$/i,
+    /^(?:send|share|give)(?:\s+me)?\s+(?:the\s+)?(?:location|pin|address|google\s+maps?)(?:\s+(?:for|of|to))?\s+(.+)$/i,
+    /^(.+?)\s+(?:location|location\s+pin|pin|address)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) return cleanLocationSubject(match[1]);
+  }
+
+  if (!allowBare || trimmed.includes("?") || trimmed.split(/\s+/).length > 10) return undefined;
+  if (/^(what|where|when|how|why|who|which|can|could|do|does|is|are|i want|i need|send|share|give|location|pin|address|maps?|google maps?)\b/i.test(trimmed)) return undefined;
+  return cleanLocationSubject(trimmed);
+}
+
+export function findVenueLocationReference(
+  query: string,
+  references: VenueLocationReference[] = [],
+): VenueLocationReference | undefined {
+  const subject = extractLocationSubject(query, true);
+  const normalizedQuery = normalizeVenueText(subject ?? query);
+  if (!normalizedQuery) return undefined;
+
+  return references.find(reference => {
+    const candidates = [reference.id, reference.name, ...(reference.aliases ?? [])]
+      .map(normalizeVenueText)
+      .filter(Boolean);
+    return candidates.some(candidate => normalizedQuery === candidate
+      || normalizedQuery.includes(candidate)
+      || candidate.includes(normalizedQuery));
+  });
+}
+
+export function buildVenueGoogleMapsSearchUrl(name: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} Koh Phangan`)}`;
+}
+
+export function formatVenueLocationReference(reference: VenueLocationReference): string {
+  return [
+    `📍 ${reference.name}`,
+    reference.area ? `\nArea:\n${reference.area}` : "",
+    `\nGoogle Maps:\n${reference.googleMapsUrl}`,
+    "\nThis is the location connected to the event listing I showed you.",
+  ].filter(Boolean).join("\n");
+}
+
+export function formatVenueSearchLocation(name: string): string {
+  return [
+    `📍 ${name}`,
+    "",
+    "Google Maps:",
+    buildVenueGoogleMapsSearchUrl(name),
+    "",
+    "I don't have a verified landmark or transport note for this venue yet, so check the Maps result before heading out.",
+  ].join("\n");
 }
 
 export function formatVenueCard(venue: VenueData): string {

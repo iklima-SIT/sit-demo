@@ -23,6 +23,7 @@ export function createApiConversationServices(repository: KnowledgeRepository = 
           response: result.response,
           fallback: result.fallback,
           sources: result.sources,
+          venueReferences: result.venueReferences,
           fallbackMessage: result.fallbackMessage,
           timeWindow: result.timeWindow,
           rejectedCandidates: result.rejectedCandidates,

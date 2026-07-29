@@ -369,6 +369,7 @@ test("Todo.Today is an independent primary source and explicit all returns every
     venue: `Yoga Shala ${index + 1}`,
     category_id: 1,
     price_label: "฿400",
+    google_map: `https://maps.example/yoga-shala-${index + 1}`,
   }));
   globalThis.fetch = (async (url) => {
     const value = String(url);
@@ -422,6 +423,15 @@ test("Todo.Today is an independent primary source and explicit all returns every
       "phangan.events calendar": 0,
     });
     assert.equal(result.diagnostics?.filterDecisions?.find(item => item.event.includes("Yoga Class 1"))?.humanNeeds?.includes("reset"), true);
+    assert.equal(result.venueReferences?.length, 7);
+    assert.deepEqual(result.venueReferences?.find(venue => venue.name === "Yoga Shala 1"), {
+      id: "yoga-shala-1",
+      name: "Yoga Shala 1",
+      aliases: ["Yoga Shala 1"],
+      area: undefined,
+      googleMapsUrl: "https://maps.example/yoga-shala-1",
+      sourceUrl: "https://todo.today/koh-phangan/2026/07/29/yoga-class-1",
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
