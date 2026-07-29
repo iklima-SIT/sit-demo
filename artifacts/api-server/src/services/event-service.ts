@@ -11,6 +11,7 @@ import {
   classifyEventExperience,
   sanitizeCustomerFacingText,
   type EventClassification,
+  type EventListingReference,
   type PrimaryExperience,
   type VenueLocationReference,
 } from "@workspace/sit-engine";
@@ -195,6 +196,7 @@ export interface LiveEventSearchResult {
   response: string | null;
   fallback: boolean;
   sources: string[];
+  events?: EventListingReference[];
   venueReferences?: VenueLocationReference[];
   queryUsed: string;
   timeWindow: NormalizedEventTimeWindow;
@@ -529,7 +531,38 @@ function eventMatchesFilters(event: CalendarEvent & Partial<EventClassification>
     || /\b(family|families|kid|kids|children|child-friendly|all ages)\b/.test(text);
   const areaMatch = !filters.area
     || text.replace(/[^a-z0-9]+/g, " ").includes(filters.area.toLowerCase().replace(/[^a-z0-9]+/g, " "));
-  return categoryMatch && audienceMatch && areaMatch;
+  const venueMatch = !filters.venue || venueTextMatches(event.venue, filters.venue);
+  return categoryMatch && audienceMatch && areaMatch && venueMatch;
+}
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1]! + 1,
+        previous[rightIndex]! + 1,
+        previous[rightIndex - 1]! + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length]!;
+}
+
+function venueTextMatches(actual: string, requested: string): boolean {
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const actualNormalized = normalize(actual);
+  const requestedNormalized = normalize(requested);
+  if (!actualNormalized || !requestedNormalized) return false;
+  if (actualNormalized.includes(requestedNormalized) || requestedNormalized.includes(actualNormalized)) return true;
+
+  const actualTokens = actualNormalized.split(" ");
+  return requestedNormalized.split(" ").every(token => actualTokens.some(candidate => {
+    const tolerance = Math.min(token.length, candidate.length) >= 8 ? 2 : Math.min(token.length, candidate.length) >= 5 ? 1 : 0;
+    return editDistance(token, candidate) <= tolerance;
+  }));
 }
 
 function userPurposeDetail(userContext: unknown): string | undefined {
@@ -710,6 +743,24 @@ function buildVenueLocationReferences(events: MergedEvent[]): VenueLocationRefer
   }
 
   return [...references.values()];
+}
+
+function buildEventListingReferences(events: MergedEvent[]): EventListingReference[] {
+  return events.map(event => ({
+    id: event.sourceId ?? `${event.title}-${event.venue}-${event.startTime}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, ""),
+    title: event.title,
+    category: event.category,
+    venue: event.venue,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    price: event.price,
+    primaryExperience: event.primaryExperience,
+    googleMapsUrl: event.googleMapsUrl,
+    sourceUrl: event.sourceLinks[0],
+  }));
 }
 
 function formatEventTimeRange(event: CalendarEvent): string {
@@ -1259,6 +1310,7 @@ export async function searchLiveEvents(input: EventSearchRequest, apiKey?: strin
       response: formatted.response,
       fallback: false,
       sources: Array.from(new Set(events.flatMap(event => event.sourceLinks))),
+      events: buildEventListingReferences(events),
       venueReferences: buildVenueLocationReferences(events),
       queryUsed: `approved source aggregation for ${input.timeWindow.label}`,
       timeWindow: input.timeWindow,

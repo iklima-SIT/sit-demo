@@ -16,6 +16,7 @@ export type {
   EventSearchResult,
   EventService,
   EventReference,
+  EventListingReference,
   EventSearchDiagnostics,
   Intent,
   KnowledgeSearchContext,
@@ -104,11 +105,13 @@ export {
   formatVenueSearchLocation,
   formatVenueCard,
   getVenueByReference,
+  venueNamesMatch,
   type VenueData,
 } from "./venues.js";
 export {
   buildEventFallback,
   buildExpertAnswer,
+  buildGoogleSearchFallback,
   buildHonestFallback,
   extractKBInsight,
   searchKB,

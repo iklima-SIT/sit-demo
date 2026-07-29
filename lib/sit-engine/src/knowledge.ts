@@ -206,29 +206,23 @@ export function buildEventFallback(scope: "tonight" | "tomorrow" | "narrow" = "t
   ].join("\n");
 }
 
+export function buildGoogleSearchFallback(question: string): string {
+  const cleanedQuestion = question.trim().replace(/\s+/g, " ");
+  const searchQuery = `${cleanedQuestion} Koh Phangan`;
+  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
+  return [
+    "I don't have reliable information about that, so I won't guess.",
+    "",
+    `Google search: ${searchQuery}`,
+    searchUrl,
+  ].join("\n");
+}
+
 export function buildHonestFallback(question: string): string {
   const q = question.toLowerCase();
 
   if (/tonight|today|tomorrow|what.?s on|happening|event|schedule|lineup/.test(q.replace(/[’']/g, ""))) {
     return buildEventFallback();
   }
-  if (/cost|price|how much|expensive|cheap|budget/.test(q)) {
-    return "Rough daily costs:\n• Budget: $30–50\n• Mid-range: $60–100\n• Comfortable: $100–150+\n\nLocal insight:\nAccommodation near the main areas is 30% cheaper if you book direct.";
-  }
-  if (/safe|dangerous|crime|scam/.test(q)) {
-    return "Generally safe. Main risks:\n• Scooter accidents\n• Petty theft at Full Moon\n• Dodgy ceremony facilitators\n\nAnything specific you're worried about?";
-  }
-  if (/weather|rain|season|monsoon|best time/.test(q)) {
-    return "Best months:\n• Feb – Aug: dry, sunny\n• Sep – Oct: occasional rain\n• Nov – Dec: rough — heavy rain, choppy seas\n\nWhen are you planning to come?";
-  }
-  if (/visa|stay|how long|legal/.test(q)) {
-    return "Visa basics:\n• 30 days on arrival (most passports)\n• +30 day extension at Thong Sala immigration\n• Longer stays need a proper Thai visa\n\nWhat's your nationality?";
-  }
-  if (/sim|internet|wifi|data/.test(q)) {
-    return "Connectivity:\n• AIS or DTAC — both solid coverage\n• Monthly SIM with unlimited data: ~$15–20\n• Most coworking spaces and cafés have reliable wifi\n\nAre you planning to work remotely?";
-  }
-  if (/food|eat|restaurant|cafe|coffee/.test(q)) {
-    return "Food breakdown:\n• Street food: $2–5 per meal\n• Local restaurants: $5–10\n• Western / health cafés: $8–15\n\nLocal insight:\nThe best spots rarely have English menus out front.";
-  }
-  return "I don't have a specific answer for that. Tell me more and I'll give you what I do know.";
+  return buildGoogleSearchFallback(question);
 }

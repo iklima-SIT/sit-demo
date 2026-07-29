@@ -88,6 +88,23 @@ test("knowledge repository exposes versioning", async () => {
   assert.equal((await repository.getImportMetadata()).cardCount, 1);
 });
 
+test("knowledge repository rejects unrelated high-priority cards instead of inventing an answer", async () => {
+  const normalized = normalizeKnowledgeRows({
+    sheetName: "Iklima",
+    sourceWorkbook: "kb.xlsx",
+    version: "relevance-version",
+    importedAt: "2026-07-11T00:00:00.000Z",
+    rows: [
+      ["Card ID", "Category", "Topic", "Deep Local Insight", "Priority Score V10", "Locality Score"],
+      ["K1", "Journey", "First week island experiences", "Try dance, a sunset gathering and a jungle hike.", 10, 10],
+    ],
+  });
+  const repository = new InMemoryKnowledgeRepository(normalized.bundle);
+  const hits = await repository.search("Who is Aliyah?", { purpose: "wellness" });
+
+  assert.deepEqual(hits, []);
+});
+
 test("web and WhatsApp receive the same KB answer from the server repository", async () => {
   const normalized = normalizeKnowledgeRows({
     sheetName: "Iklima",

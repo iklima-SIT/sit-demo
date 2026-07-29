@@ -30,13 +30,18 @@ const EMPTY_METADATA: KnowledgeImportMetadata = {
 };
 
 const TOKEN_RE = /[a-z0-9]+/g;
+const QUERY_STOP_WORDS = new Set([
+  "a", "an", "and", "about", "are", "can", "could", "do", "does", "for", "how", "i", "is",
+  "me", "my", "of", "on", "the", "tell", "that", "this", "to", "what", "when", "where", "which",
+  "who", "why", "would", "you",
+]);
 
 function tokenize(value: string): string[] {
   return value.toLowerCase().match(TOKEN_RE) ?? [];
 }
 
 function scoreCard(card: CanonicalKnowledgeCard, query: string, purpose?: string): number {
-  const queryTokens = tokenize(query);
+  const queryTokens = tokenize(query).filter(token => !QUERY_STOP_WORDS.has(token));
   if (queryTokens.length === 0) return 0;
 
   const weightedText = [
@@ -57,10 +62,14 @@ function scoreCard(card: CanonicalKnowledgeCard, query: string, purpose?: string
     card.masterCategory,
   ].join(" ").toLowerCase();
 
-  let score = 0;
+  const knowledgeTokens = new Set(tokenize(weightedText));
+  let lexicalScore = 0;
   for (const token of queryTokens) {
-    if (weightedText.includes(token)) score += token.length > 3 ? 2 : 1;
+    if (knowledgeTokens.has(token)) lexicalScore += token.length > 3 ? 2 : 1;
   }
+  if (lexicalScore === 0) return 0;
+
+  let score = lexicalScore;
   if (purpose && weightedText.includes(purpose.toLowerCase())) score += 2;
   score += Math.min(card.priorityScore, 10) / 10;
   score += Math.min(card.localityScore, 10) / 20;

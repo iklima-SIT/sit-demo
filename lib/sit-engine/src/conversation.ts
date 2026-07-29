@@ -11,6 +11,9 @@ import type {
   ConversationMemory,
   ConversationState,
   DeveloperTrace,
+  EventListingReference,
+  EventReference,
+  EventSearchResult,
   MemoryUpdates,
   RunConversationTurnInput,
   RunConversationTurnOutput,
@@ -24,10 +27,10 @@ import { INITIAL_CTX } from "./types.js";
 import { classifyIntent, isDateFollowUp, isDirectQuestion, isEventBroadeningRequest, isTomorrowEventQuery } from "./intent-router.js";
 import { applyMemoryUpdates, getMemoryTrace, isEventNarrowFollowUp, isEventTomorrowFollowUp, rememberVenueFromAssistantText, resolveVenueReference } from "./memory.js";
 import { buildEventFallback, buildHonestFallback } from "./knowledge.js";
-import { createEventSearchRequest, hasExplicitEventTimeExpression, resolveEventFilteringCutoff, type EventSearchRequest } from "./time-resolver.js";
+import { KOH_PHANGAN_TIME_ZONE, createEventSearchRequest, hasExplicitEventTimeExpression, resolveEventFilteringCutoff, type EventSearchRequest } from "./time-resolver.js";
 import type { EventSearchFilters } from "./event-filters.js";
 import { sanitizeAssistantMessages } from "./customer-output.js";
-import { extractLocationSubject } from "./venues.js";
+import { extractLocationSubject, extractVenueFromText, findVenueLocationReference, venueNamesMatch } from "./venues.js";
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
 
@@ -500,7 +503,7 @@ function applyAssistantTextMemory(state: ConversationState, messages: Array<{ ty
 }
 
 function compactEventFilters(filters: EventSearchFilters): EventSearchFilters | undefined {
-  if (!filters.categories?.length && !filters.audience && !filters.area) return undefined;
+  if (!filters.categories?.length && !filters.audience && !filters.area && !filters.venue) return undefined;
   return filters;
 }
 
@@ -509,10 +512,12 @@ function mergeEventFilters(
   explicit: EventSearchFilters | undefined,
   broadenCategories: boolean,
 ): EventSearchFilters | undefined {
+  const venue = explicit?.venue ?? previous?.venue;
   return compactEventFilters({
     categories: broadenCategories ? undefined : explicit?.categories ?? previous?.categories,
     audience: explicit?.audience ?? previous?.audience,
     area: explicit?.area ?? previous?.area,
+    ...(venue ? { venue } : {}),
   });
 }
 
@@ -525,10 +530,34 @@ function buildUserRequestContext(message: string, request: EventSearchRequest): 
     requestedTimeWindow: request.timeWindow,
     requestedCategory: request.filters?.categories?.[0],
     requestedArea: request.filters?.area,
-    requestedScope: request.filters?.area ? "area" : "island-wide",
+    requestedVenue: request.filters?.venue,
+    requestedScope: request.filters?.venue ? "venue" : request.filters?.area ? "area" : "island-wide",
     requestedFilters: request.filters,
     unresolvedAmbiguities: request.timeWindow.clarificationNeeded ? ["time_window"] : [],
   };
+}
+
+function formatEventReferenceTime(event: EventListingReference): string {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: KOH_PHANGAN_TIME_ZONE,
+  });
+  return `${formatter.format(new Date(event.startTime))}-${formatter.format(new Date(event.endTime))}`;
+}
+
+function formatCachedVenueEvents(events: EventListingReference[], venue: string, label: string): string {
+  const lines = [`At ${venue} ${label.toLowerCase()}:`, ""];
+  for (const event of events) {
+    const price = event.price ? ` · ${event.price}` : "";
+    lines.push(`• ${event.title} — ${formatEventReferenceTime(event)}${price}`);
+  }
+  return lines.join("\n");
+}
+
+function sameTimeWindow(left: EventReference["timeWindow"], right: EventSearchRequest["timeWindow"]): boolean {
+  return Boolean(left && left.startTime === right.startTime && left.endTime === right.endTime);
 }
 
 function clearPendingUserRequest(memory: ConversationMemory): ConversationMemory {
@@ -644,6 +673,44 @@ function resolveActiveContract(
   return undefined;
 }
 
+function resolveActiveLocationRefinement(
+  message: string,
+  state: ConversationState,
+  devTrace: boolean | undefined,
+): AssistantDecision | undefined {
+  if (state.activeTask?.kind !== "location" || state.activeTask.contract) return undefined;
+  if (classifyIntent(message, state.memory) !== "general_chat") return undefined;
+
+  const recentVenueReferences = state.memory.lastVenueReference
+    ? [state.memory.lastVenueReference, ...(state.memory.lastEvent?.venueReferences ?? [])]
+    : state.memory.lastEvent?.venueReferences;
+  const knownVenue = extractVenueFromText(message);
+  const eventVenue = findVenueLocationReference(message, recentVenueReferences);
+  const isCorrection = /\b(?:not asking|i mean|i meant|instead)\b/i.test(message);
+  if (!knownVenue && !eventVenue && !isCorrection) return undefined;
+  if (!extractLocationSubject(message, true)) return undefined;
+
+  const onboardingIncomplete = !state.context.briefGenerated && state.memory.onboardingStage !== "complete";
+  const decision: AssistantDecision = {
+    intent: "location_request",
+    action: "resolve_location",
+    answerMode: "service",
+    requiredService: "location",
+    memoryUpdates: {
+      currentMode: "information",
+      onboardingPaused: onboardingIncomplete,
+    },
+    debugReason: "Resolved the message as an explicit venue correction within the active location task.",
+  };
+  if (devTrace) {
+    decision.trace = {
+      ...buildTrace(message, state.memory, decision, false),
+      memoryUsed: [...getMemoryTrace(message, state.memory), "activeTask"],
+    };
+  }
+  return decision;
+}
+
 export async function runConversationTurn(input: RunConversationTurnInput): Promise<RunConversationTurnOutput> {
   const trimmed = input.message.trim();
   if (!trimmed && input.state.turns.length === 0) {
@@ -675,7 +742,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
   const confirmedTomorrowFollowUp = isEventTomorrowFollowUp(trimmed, workingState.memory);
   const broadensEventSearch = isEventBroadeningRequest(trimmed);
   const contractDecision = resolveActiveContract(trimmed, workingState, input.devTrace);
-  const decision = contractDecision ?? decideAssistantAction({
+  const locationRefinementDecision = contractDecision
+    ? undefined
+    : resolveActiveLocationRefinement(trimmed, workingState, input.devTrace);
+  const decision = contractDecision ?? locationRefinementDecision ?? decideAssistantAction({
     userMessage: trimmed,
     context: workingState.context,
     memory: workingState.memory,
@@ -808,9 +878,15 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       && Boolean(previousWindow);
     const timeWindow = shouldPreserveWindow ? previousWindow! : resolvedEventRequest.timeWindow;
     const previousFilters = previousEvent?.filters ?? originalRequest?.requestedFilters;
-    const filters = decision.intent === "follow_up"
+    const mergedFilters = decision.intent === "follow_up"
       ? mergeEventFilters(previousFilters, resolvedEventRequest.filters, broadensEventSearch)
       : resolvedEventRequest.filters;
+    const matchingVenueReference = mergedFilters?.venue
+      ? findVenueLocationReference(mergedFilters.venue, previousEvent?.venueReferences)
+      : undefined;
+    const filters = mergedFilters?.venue && matchingVenueReference
+      ? { ...mergedFilters, venue: matchingVenueReference.name }
+      : mergedFilters;
     const eventRequest = {
       ...resolvedEventRequest,
       timeWindow,
@@ -848,7 +924,27 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       : decision.intent === "follow_up"
         ? "narrow"
         : "tonight";
-    const eventResult = await input.services.events.search(eventRequest, { state: workingState, scope });
+    const canUseActiveVenueResults = Boolean(
+      filters?.venue
+      && !filters.categories?.length
+      && !filters.audience
+      && !filters.area
+      && previousEvent?.events?.length
+      && sameTimeWindow(previousEvent.timeWindow, eventRequest.timeWindow),
+    );
+    const activeVenueEvents = canUseActiveVenueResults
+      ? previousEvent!.events!.filter(event => venueNamesMatch(event.venue, filters!.venue!))
+      : [];
+    const eventResult: EventSearchResult = activeVenueEvents.length > 0
+      ? {
+          response: formatCachedVenueEvents(activeVenueEvents, matchingVenueReference?.name ?? filters!.venue!, eventRequest.timeWindow.label),
+          fallback: false,
+          events: activeVenueEvents,
+          venueReferences: previousEvent?.venueReferences?.filter(reference => venueNamesMatch(reference.name, filters!.venue!)),
+          sources: activeVenueEvents.map(event => event.sourceUrl).filter((source): source is string => Boolean(source)),
+          timeWindow: eventRequest.timeWindow,
+        }
+      : await input.services.events.search(eventRequest, { state: workingState, scope });
     const text = eventResult.fallback || !eventResult.response
       ? eventResult.fallbackMessage ?? buildEventFallback(scope)
       : eventResult.response;
@@ -873,6 +969,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
           query: eventRequest.queryText,
           timeWindow: eventRequest.timeWindow,
           filters: eventRequest.filters,
+          events: eventResult.events,
           venueReferences: eventResult.venueReferences,
         },
       },

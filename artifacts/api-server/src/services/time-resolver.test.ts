@@ -494,6 +494,45 @@ test("EventService excludes unrelated categories from an explicit wellness reque
   }
 });
 
+test("EventService treats an explicit venue as a strict event constraint", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url) => {
+    if (String(url).includes("phangantoday")) {
+      return new Response(`
+        <html><body>
+          Wednesday Jul 22, 2026
+          <br>🕒 8:00 PM - 11:00 PM
+          <br>DJ Night: Mystic Bloom
+          <br>📍 Tipsy Cocktail Bar
+          <br>💰 Free
+          <br>🕒 7:00 PM - 9:00 PM
+          <br>Candlelit Sound Healing
+          <br>📍 Ananda Yoga & Detox
+        </body></html>
+      `, { status: 200 });
+    }
+    if (String(url).includes("phangan.events")) return new Response("<html>No matches</html>", { status: 200 });
+    if (String(url).includes("todo.today")) return new Response("<html>fallback app page</html>", { status: 200 });
+    throw new Error(`Unexpected fetch ${String(url)}`);
+  }) as typeof fetch;
+
+  try {
+    const input = createLiveEventSearchInput(
+      "What is the event in tipsy coctail bar tonight?",
+      new Date("2026-07-22T10:00:00.000Z"),
+    );
+    const result = await searchLiveEvents(input);
+
+    assert.match(result.response ?? "", /DJ Night: Mystic Bloom/);
+    assert.doesNotMatch(result.response ?? "", /Candlelit Sound Healing|island-wide event landscape/);
+    assert.equal(result.diagnostics?.searchMode, "filtered");
+    assert.equal(result.diagnostics?.appliedFilters?.venue, "tipsy coctail bar");
+    assert.equal(result.events?.[0]?.venue, "Tipsy Cocktail Bar");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("EventService uses physical-health context to prioritize movement without broadening wellness", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url) => {

@@ -216,10 +216,13 @@ function cleanLocationSubject(value: string): string | undefined {
 export function extractLocationSubject(text: string, allowBare = false): string | undefined {
   const trimmed = text.trim();
   const patterns = [
+    /^i\s+am\s+not\s+asking\s+(?:for|about)\s+.+?[.!?,;]?\s*i\s+am\s+asking(?:\s+(?:for|about))?\s+(.+)$/i,
+    /^(?:actually[,]?\s*)?(?:i\s+mean|i\s+meant)\s+(.+)$/i,
     /^where(?:\s+is|'s)\s+(?:the\s+)?(?:location\s+(?:of|for)\s+)?(.+)$/i,
     /^(?:i\s+(?:want|need)\s+)?(?:the\s+)?(?:location(?:\s+pin)?|pin|address|google\s+maps?)\s+(?:for|of|to)\s+(.+)$/i,
     /^(?:send|share|give)(?:\s+me)?\s+(?:the\s+)?(?:location|pin|address|google\s+maps?)(?:\s+(?:for|of|to))?\s+(.+)$/i,
     /^(.+?)\s+(?:location|location\s+pin|pin|address)$/i,
+    /\bwhere(?:\s+is|'s)\s+(?:the\s+)?(?:location\s+(?:of|for)\s+)?(.+)$/i,
   ];
 
   for (const pattern of patterns) {
@@ -230,6 +233,41 @@ export function extractLocationSubject(text: string, allowBare = false): string 
   if (!allowBare || trimmed.includes("?") || trimmed.split(/\s+/).length > 10) return undefined;
   if (/^(what|where|when|how|why|who|which|can|could|do|does|is|are|i want|i need|send|share|give|location|pin|address|maps?|google maps?)\b/i.test(trimmed)) return undefined;
   return cleanLocationSubject(trimmed);
+}
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1]! + 1,
+        previous[rightIndex]! + 1,
+        previous[rightIndex - 1]! + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length]!;
+}
+
+export function venueNamesMatch(left: string, right: string): boolean {
+  const normalizedLeft = normalizeVenueText(left);
+  const normalizedRight = normalizeVenueText(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight || normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return true;
+  }
+
+  const leftTokens = normalizedLeft.split(" ");
+  const rightTokens = normalizedRight.split(" ");
+  const [shorter, longer] = leftTokens.length <= rightTokens.length
+    ? [leftTokens, rightTokens]
+    : [rightTokens, leftTokens];
+  return shorter.every(token => longer.some(candidate => {
+    const tolerance = Math.min(token.length, candidate.length) >= 8 ? 2 : Math.min(token.length, candidate.length) >= 5 ? 1 : 0;
+    return editDistance(token, candidate) <= tolerance;
+  }));
 }
 
 export function findVenueLocationReference(
@@ -244,9 +282,7 @@ export function findVenueLocationReference(
     const candidates = [reference.id, reference.name, ...(reference.aliases ?? [])]
       .map(normalizeVenueText)
       .filter(Boolean);
-    return candidates.some(candidate => normalizedQuery === candidate
-      || normalizedQuery.includes(candidate)
-      || candidate.includes(normalizedQuery));
+    return candidates.some(candidate => venueNamesMatch(normalizedQuery, candidate));
   });
 }
 

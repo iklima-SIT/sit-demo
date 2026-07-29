@@ -10,7 +10,7 @@ export function normalizeIntentText(text: string): string {
 export function isDefinitionQuestion(text: string): boolean {
   const t = text.toLowerCase().trim();
   if (/\b(tonight|todays?|tomorrows?|this week|this weekend|right now|happening now|what.?s on)\b/.test(normalizeIntentText(t))) return false;
-  return /^(what is|what'?s a |what are|explain|describe|tell me (what|about)|how does|what do you mean|define)\b/i.test(t);
+  return /^(what is|what'?s a |what are|who is|who'?s|explain|describe|tell me (what|about)|how does|what do you mean|define)\b/i.test(t);
 }
 
 export function isEventQuery(text: string): boolean {

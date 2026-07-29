@@ -24,3 +24,26 @@ test("broad event requests do not invent filters", () => {
   const request = createEventSearchRequest("What's happening tonight?", new Date("2026-07-22T05:00:00.000Z"));
   assert.equal(request.filters, undefined);
 });
+
+test("venue-specific event questions become structured venue filters", () => {
+  assert.deepEqual(resolveEventSearchFilters("What is the event in tipsy coctail bar tonight?"), {
+    categories: undefined,
+    audience: undefined,
+    area: undefined,
+    venue: "tipsy coctail bar",
+  });
+  assert.deepEqual(resolveEventSearchFilters("What's happening at Arcana tonight?"), {
+    categories: undefined,
+    audience: undefined,
+    area: undefined,
+    venue: "Arcana",
+  });
+});
+
+test("known island areas remain area filters instead of venue filters", () => {
+  assert.deepEqual(resolveEventSearchFilters("What events are in Sri Thanu tonight?"), {
+    categories: undefined,
+    audience: undefined,
+    area: "Sri Thanu",
+  });
+});

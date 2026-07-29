@@ -51,6 +51,7 @@ export interface EventSearchResult {
   response: string | null;
   fallback: boolean;
   sources?: string[];
+  events?: EventListingReference[];
   venueReferences?: VenueLocationReference[];
   fallbackMessage?: string;
   timeWindow?: TimeWindow;
@@ -95,6 +96,7 @@ export interface EventSearchDiagnostics {
     categories?: string[];
     audience?: string;
     area?: string;
+    venue?: string;
   };
   filteredOutCount?: number;
   filterDecisions?: Array<{
@@ -175,11 +177,25 @@ export interface VenueLocationReference {
   sourceUrl?: string;
 }
 
+export interface EventListingReference {
+  id: string;
+  title: string;
+  category?: string;
+  venue: string;
+  startTime: string;
+  endTime: string;
+  price?: string;
+  primaryExperience?: string;
+  googleMapsUrl?: string;
+  sourceUrl?: string;
+}
+
 export interface EventReference {
   scope: "tonight" | "tomorrow" | "narrow";
   query: string;
   timeWindow?: TimeWindow;
   filters?: EventSearchFilters;
+  events?: EventListingReference[];
   venueReferences?: VenueLocationReference[];
 }
 
@@ -219,7 +235,8 @@ export interface UserRequestContext {
   requestedTimeWindow?: TimeWindow;
   requestedCategory?: EventCategoryFilter;
   requestedArea?: string;
-  requestedScope: "island-wide" | "area";
+  requestedVenue?: string;
+  requestedScope: "island-wide" | "area" | "venue";
   requestedFilters?: EventSearchFilters;
   unresolvedAmbiguities: string[];
 }

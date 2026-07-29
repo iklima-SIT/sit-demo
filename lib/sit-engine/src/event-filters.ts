@@ -14,6 +14,7 @@ export interface EventSearchFilters {
   categories?: EventCategoryFilter[];
   audience?: EventAudienceFilter;
   area?: string;
+  venue?: string;
 }
 
 const AREA_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
@@ -27,6 +28,29 @@ const AREA_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
 
 function unique<T>(values: T[]): T[] {
   return Array.from(new Set(values));
+}
+
+function normalizePlace(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function extractEventVenue(text: string): string | undefined {
+  const patterns = [
+    /\bwhat(?:'s|\s+is)\s+(?:the\s+)?events?\s+(?:at|in)\s+(.+)$/i,
+    /\bwhat(?:'s|\s+is)\s+(?:happening|going\s+on)\s+(?:at|in)\s+(.+)$/i,
+    /\b(?:events?|part(?:y|ies)|classes?|workshops?)\s+(?:at|in)\s+(.+)$/i,
+  ];
+  const raw = patterns
+    .map(pattern => text.match(pattern)?.[1])
+    .find(Boolean);
+  if (!raw) return undefined;
+
+  const venue = raw
+    .replace(/\s+\b(?:today|tonight|tomorrow|later\s+tonight|this\s+weekend|next\s+weekend|this\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$/i, "")
+    .replace(/[?.!,]+$/g, "")
+    .trim();
+  if (!venue || /^(?:koh\s+phangan|the\s+island|island|around\s+the\s+island)$/i.test(venue)) return undefined;
+  return venue;
 }
 
 export function resolveEventSearchFilters(text: string): EventSearchFilters | undefined {
@@ -45,16 +69,21 @@ export function resolveEventSearchFilters(text: string): EventSearchFilters | un
   }
 
   const area = AREA_PATTERNS.find(candidate => candidate.pattern.test(normalized))?.label;
+  const extractedVenue = extractEventVenue(text);
+  const venue = extractedVenue && (!area || normalizePlace(extractedVenue) !== normalizePlace(area))
+    ? extractedVenue
+    : undefined;
   const audience = /\bfamil(?:y|ies)\b|\bkids?\b|\bchildren\b|\bchild-friendly\b/.test(normalized)
     ? "family" as const
     : undefined;
   const resolvedCategories = unique(categories);
 
-  if (resolvedCategories.length === 0 && !area && !audience) return undefined;
+  if (resolvedCategories.length === 0 && !area && !audience && !venue) return undefined;
   return {
     categories: resolvedCategories.length > 0 ? resolvedCategories : undefined,
     audience,
     area,
+    ...(venue ? { venue } : {}),
   };
 }
 
@@ -72,6 +101,8 @@ export function describeEventSearchFilters(filters: EventSearchFilters | undefin
   })[category]);
   if (filters.audience) labels.push("family-friendly");
   const categoryText = labels.join(" or ");
+  if (categoryText && filters.venue) return `${categoryText} at ${filters.venue}`;
+  if (filters.venue) return `events at ${filters.venue}`;
   if (categoryText && filters.area) return `${categoryText} around ${filters.area}`;
   if (filters.area) return `events around ${filters.area}`;
   return categoryText || undefined;

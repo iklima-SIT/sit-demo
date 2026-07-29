@@ -235,6 +235,98 @@ test("event venue references survive the event turn and resolve an exact locatio
   assert.equal(location.updatedState.activeTask?.contract, undefined);
 });
 
+test("compound locations and venue event follow-ups stay on the newly named venue", async () => {
+  let eventServiceCalls = 0;
+  const services = createConversationServices({
+    events: {
+      async search(request) {
+        eventServiceCalls += 1;
+        return {
+          response: [
+            "DJ Night: Mystic Bloom — 8:00 PM-11:00 PM, Tipsy Cocktail Bar",
+            "Candlelit Sound Healing — 7:00 PM-9:00 PM, Ananda Yoga & Detox",
+          ].join("\n"),
+          fallback: false,
+          events: [
+            {
+              id: "mystic-bloom",
+              title: "DJ Night: Mystic Bloom",
+              category: "Music and DJ sets",
+              venue: "Tipsy Cocktail Bar",
+              startTime: request.timeWindow.startTime,
+              endTime: request.timeWindow.endTime,
+              price: "Free",
+              primaryExperience: "music",
+              sourceUrl: "https://todo.today/mystic-bloom",
+            },
+            {
+              id: "candlelit-sound-healing",
+              title: "Candlelit Sound Healing",
+              category: "Yoga, wellness and breathwork",
+              venue: "Ananda Yoga & Detox",
+              startTime: request.timeWindow.startTime,
+              endTime: request.timeWindow.endTime,
+              primaryExperience: "wellness",
+              sourceUrl: "https://todo.today/candlelit-sound-healing",
+            },
+          ],
+          venueReferences: [
+            {
+              id: "tipsy-cocktail-bar",
+              name: "Tipsy Cocktail Bar",
+              aliases: ["Tipsy Cocktail Bar"],
+              googleMapsUrl: "https://maps.example/tipsy",
+            },
+            {
+              id: "ananda-yoga-detox",
+              name: "Ananda Yoga & Detox",
+              aliases: ["Ananda Yoga"],
+              googleMapsUrl: "https://maps.example/ananda",
+            },
+          ],
+          timeWindow: request.timeWindow,
+        };
+      },
+    },
+  });
+
+  const events = await runConversationTurn({
+    message: "What's happening tonight?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const ananda = await runConversationTurn({
+    message: "where is ananda yoga",
+    state: events.updatedState,
+    channel: "web",
+    services,
+  });
+  assert.match(ananda.messages[0]!.text, /Ananda Yoga & Detox/);
+
+  const tipsyLocation = await runConversationTurn({
+    message: "thank you, after yoga i want to go to a party, where is tipsy coctail bar",
+    state: ananda.updatedState,
+    channel: "web",
+    services,
+  });
+  assert.match(tipsyLocation.messages[0]!.text, /Tipsy Cocktail Bar/);
+  assert.doesNotMatch(tipsyLocation.messages[0]!.text, /Ananda Yoga & Detox/);
+
+  const tipsyEvent = await runConversationTurn({
+    message: "what is the event in tipsy coctail bar tonight?",
+    state: tipsyLocation.updatedState,
+    channel: "web",
+    services,
+  });
+  const answer = tipsyEvent.messages[0]!.text;
+  assert.match(answer, /At Tipsy Cocktail Bar tonight/i);
+  assert.match(answer, /DJ Night: Mystic Bloom/);
+  assert.doesNotMatch(answer, /Candlelit Sound Healing|island-wide event landscape/);
+  assert.equal(eventServiceCalls, 1);
+  assert.equal(tipsyEvent.updatedState.memory.lastEvent?.filters?.venue, "Tipsy Cocktail Bar");
+});
+
 test("an explicitly named venue returns a Maps search instead of asking for the venue again", async () => {
   const output = await runConversationTurn({
     message: "Where is Arcana?",
@@ -329,6 +421,105 @@ test("web and WhatsApp consume the same venue contract through the canonical run
   assert.equal(web.decision?.requiredService, whatsapp.decision?.requiredService);
   assert.equal(web.messages[0]!.text, whatsapp.messages[0]!.text);
   assert.deepEqual(web.updatedState.activeTask, whatsapp.updatedState.activeTask);
+});
+
+function venueCorrectionServices(): ConversationServices {
+  return createConversationServices({
+    knowledge: {
+      async search() {
+        return { answer: null };
+      },
+    },
+  });
+}
+
+function stateWithRecentEventVenues(): ConversationState {
+  const state = createInitialConversationState();
+  state.memory.lastEvent = {
+    scope: "tomorrow",
+    query: "yoga tomorrow",
+    venueReferences: [
+      {
+        id: "seeds-of-dreams",
+        name: "Seeds of Dreams",
+        googleMapsUrl: "https://maps.example/seeds-of-dreams",
+      },
+      {
+        id: "kaia-studio",
+        name: "Kaia Studio",
+        googleMapsUrl: "https://maps.example/kaia-studio",
+      },
+    ],
+  };
+  return state;
+}
+
+test("a newly named venue outranks the previously remembered location", async () => {
+  const services = venueCorrectionServices();
+  const seeds = await runConversationTurn({
+    message: "Where is Seeds of Dreams?",
+    state: stateWithRecentEventVenues(),
+    channel: "web",
+    services,
+  });
+  const kaia = await runConversationTurn({
+    message: "Where is Kaia Studio?",
+    state: seeds.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(kaia.decision?.intent, "location_request");
+  assert.match(kaia.messages[0]!.text, /Kaia Studio/);
+  assert.match(kaia.messages[0]!.text, /maps\.example\/kaia-studio/);
+  assert.doesNotMatch(kaia.messages[0]!.text, /Seeds of Dreams/);
+  assert.equal(kaia.updatedState.memory.lastVenue, "kaia-studio");
+});
+
+test("a venue correction refines the active location task without restarting onboarding", async () => {
+  const services = venueCorrectionServices();
+  const seeds = await runConversationTurn({
+    message: "Where is Seeds of Dreams?",
+    state: stateWithRecentEventVenues(),
+    channel: "web",
+    services,
+  });
+  const correction = await runConversationTurn({
+    message: "I am not asking for Seeds of Dreams. I am asking Kaia Studio",
+    state: seeds.updatedState,
+    channel: "web",
+    services,
+    devTrace: true,
+  });
+
+  assert.equal(correction.decision?.intent, "location_request");
+  assert.match(correction.decision?.debugReason ?? "", /venue correction/i);
+  assert.match(correction.messages[0]!.text, /Kaia Studio/);
+  assert.doesNotMatch(correction.messages[0]!.text, /Nice to meet you|how old/i);
+});
+
+test("an unrelated factual question replaces a completed location task", async () => {
+  const services = venueCorrectionServices();
+  const seeds = await runConversationTurn({
+    message: "Where is Seeds of Dreams?",
+    state: stateWithRecentEventVenues(),
+    channel: "web",
+    services,
+  });
+  const person = await runConversationTurn({
+    message: "Who is Aliyah?",
+    state: seeds.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(person.decision?.intent, "definition");
+  assert.equal(person.decision?.requiredService, "knowledge");
+  assert.match(person.messages[0]!.text, /I don't have reliable information/i);
+  assert.match(person.messages[0]!.text, /Who is Aliyah\? Koh Phangan/);
+  assert.match(person.messages[0]!.text, /google\.com\/search\?q=Who%20is%20Aliyah%3F%20Koh%20Phangan/);
+  assert.doesNotMatch(person.messages[0]!.text, /Seeds of Dreams/);
+  assert.equal(person.updatedState.activeTask?.kind, "knowledge");
 });
 
 test("pending onboarding pauses for an opening-hours request", async () => {
