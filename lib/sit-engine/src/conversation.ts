@@ -328,7 +328,7 @@ export function decideAssistantAction(input: DecisionInput): AssistantDecision {
       memoryUpdates: { pendingEventFollowUp: undefined, lastTopic: "events", ...informationModeUpdates() },
       debugReason: "Resolved affirmative reply against pending tomorrow event follow-up.",
     };
-  } else if (isEventNarrowFollowUp(trimmed, input.memory)) {
+  } else if (detectedIntent === "follow_up" && isEventNarrowFollowUp(trimmed, input.memory)) {
     decision = {
       intent: "follow_up",
       action: "call_live_events",

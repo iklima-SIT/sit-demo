@@ -235,6 +235,58 @@ test("event venue references survive the event turn and resolve an exact locatio
   assert.equal(location.updatedState.activeTask?.contract, undefined);
 });
 
+test("explicit Ananda location outranks a pending event-narrowing follow-up", async () => {
+  let eventCalls = 0;
+  const services = createConversationServices({
+    events: {
+      async search(request) {
+        eventCalls += 1;
+        return {
+          response: "Mixed Level Vinyasa w/ Aliyah - Ananda Yoga & Detox",
+          fallback: false,
+          events: [{
+            id: "ananda-vinyasa",
+            title: "Mixed Level Vinyasa w/ Aliyah",
+            venue: "Ananda Yoga & Detox",
+            startTime: request.timeWindow.startTime,
+            endTime: request.timeWindow.endTime,
+            primaryExperience: "yoga",
+          }],
+          venueReferences: [{
+            id: "ananda-yoga-detox",
+            name: "Ananda Yoga & Detox",
+            aliases: ["Ananda Yoga"],
+            googleMapsUrl: "https://maps.example/ananda",
+          }],
+          timeWindow: request.timeWindow,
+        };
+      },
+    },
+  });
+
+  const events = await runConversationTurn({
+    message: "Could you recommend me a vinyasa yoga class for tomorrow?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  assert.equal(events.updatedState.memory.pendingEventFollowUp, "narrow");
+
+  const location = await runConversationTurn({
+    message: "Where is Ananda Yoga?",
+    state: events.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(location.decision?.intent, "location_request");
+  assert.equal(location.decision?.requiredService, "location");
+  assert.equal(eventCalls, 1);
+  assert.match(location.messages[0]!.text, /Ananda Yoga & Detox/);
+  assert.match(location.messages[0]!.text, /https:\/\/maps\.example\/ananda/);
+  assert.doesNotMatch(location.messages[0]!.text, /Mixed Level Vinyasa/);
+});
+
 test("compound locations and venue event follow-ups stay on the newly named venue", async () => {
   let eventServiceCalls = 0;
   const services = createConversationServices({
