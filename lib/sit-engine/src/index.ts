@@ -34,6 +34,10 @@ export type {
   MemoryUpdates,
   PlanResult,
   PlanService,
+  PlaceCategory,
+  PlaceRecommendationRequest,
+  PlaceRecommendationResult,
+  RecommendationService,
   PendingUserRequest,
   RequiredService,
   RunConversationTurnInput,
@@ -70,6 +74,7 @@ export {
   createFallbackEventService,
   createKnowledgeService,
   createPlaceholderPlanService,
+  createRecommendationService,
   createStaticLocationService,
 } from "./services.js";
 export {
@@ -92,6 +97,14 @@ export {
   isRecommendationRequest,
   isTomorrowEventQuery,
 } from "./intent-router.js";
+export {
+  buildGoogleMapsPlaceSearchUrl,
+  buildPlaceAreaQuestion,
+  createGoogleMapsRecommendationService,
+  extractKohPhanganArea,
+  inferPlaceCategory,
+  isPlaceRecommendationRequest,
+} from "./places.js";
 export {
   KOH_PHANGAN_DESTINATION_CALENDAR,
 } from "./destination-context.js";

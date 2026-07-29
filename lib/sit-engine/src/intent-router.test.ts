@@ -155,3 +155,15 @@ test("an explicit itinerary request selects PlanService", () => {
   assert.equal(decision.action, "show_plans");
   assert.equal(decision.requiredService, "plans");
 });
+
+test("a generic scooter-rental request selects nearby recommendations instead of knowledge", () => {
+  const decision = decideAssistantAction({
+    userMessage: "Where can I rent a scooter?",
+    context: INITIAL_CTX,
+    memory: {},
+  });
+
+  assert.equal(decision.intent, "place_recommendation");
+  assert.equal(decision.action, "recommend_places");
+  assert.equal(decision.requiredService, "recommendations");
+});

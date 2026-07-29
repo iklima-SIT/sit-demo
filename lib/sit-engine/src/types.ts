@@ -5,6 +5,7 @@ import type { EventHumanNeed } from "./event-classification.js";
 export type Intent =
   | "live_event_search"
   | "destination_context"
+  | "place_recommendation"
   | "location_request"
   | "practical_information"
   | "definition"
@@ -21,6 +22,7 @@ export type EngineAction =
   | "generate_brief"
   | "call_live_events"
   | "resolve_destination_context"
+  | "recommend_places"
   | "resolve_location"
   | "retrieve_knowledge"
   | "show_plans"
@@ -35,7 +37,7 @@ export type AnswerMode =
   | "fallback"
   | "none";
 
-export type RequiredService = "events" | "destination_context" | "location" | "knowledge" | "plans" | "none";
+export type RequiredService = "events" | "destination_context" | "recommendations" | "location" | "knowledge" | "plans" | "none";
 
 export type ConversationChannel = "web" | "whatsapp" | "test";
 
@@ -161,6 +163,25 @@ export interface DestinationContextService {
   resolve(query: string, context: DestinationContextSearchContext): Promise<DestinationContextResult>;
 }
 
+export type PlaceCategory = "scooter_rental" | "restaurant" | "cafe" | "pharmacy" | "coworking" | "groceries" | "local_service";
+
+export interface PlaceRecommendationRequest {
+  query: string;
+  area: string;
+  category: PlaceCategory;
+}
+
+export interface PlaceRecommendationResult {
+  answer: string;
+  area: string;
+  category: PlaceCategory;
+  googleMapsUrls: string[];
+}
+
+export interface RecommendationService {
+  recommend(request: PlaceRecommendationRequest, context: ConversationState): Promise<PlaceRecommendationResult>;
+}
+
 export interface KnowledgeSearchContext {
   state: ConversationState;
   purpose?: string;
@@ -202,6 +223,7 @@ export interface PlanService {
 export interface ConversationServices {
   events: EventService;
   destinationContext: DestinationContextService;
+  recommendations: RecommendationService;
   knowledge: KnowledgeService;
   location: LocationService;
   plans: PlanService;
@@ -246,7 +268,7 @@ export interface EventReference {
   availableVenueReferences?: VenueLocationReference[];
 }
 
-export type ConversationTaskKind = "event_search" | "destination_context" | "location" | "knowledge" | "planning";
+export type ConversationTaskKind = "event_search" | "destination_context" | "place_recommendation" | "location" | "knowledge" | "planning";
 export type ConversationTaskStatus =
   | "gathering_evidence"
   | "awaiting_clarification"
@@ -307,6 +329,7 @@ export interface ConversationMemory {
   originalRequest?: UserRequestContext;
   pendingUserRequest?: PendingUserRequest;
   lastArea?: string;
+  stayingArea?: string;
   lastTopic?: string;
   lastDestinationContext?: DestinationContextReference;
   pendingFollowUp?: "event_tomorrow" | "event_narrow" | "plan";
@@ -327,6 +350,7 @@ export interface MemoryUpdates {
   originalRequest?: UserRequestContext;
   pendingUserRequest?: PendingUserRequest;
   lastArea?: string;
+  stayingArea?: string;
   lastTopic?: string;
   lastDestinationContext?: DestinationContextReference;
   pendingFollowUp?: ConversationMemory["pendingFollowUp"];
@@ -410,6 +434,11 @@ export interface RunConversationTurnOutput {
     destinationLocalTime: string;
     matchedFromMemory: boolean;
   };
+  recommendation?: {
+    area: string;
+    category: PlaceCategory;
+    googleMapsUrls: string[];
+  };
 }
 
 export interface UserContext {
@@ -425,6 +454,7 @@ export interface UserContext {
   purposeDetailAsked: boolean;
   groupComposition?: string;
   groupCompositionAsked: boolean;
+  stayingArea?: string;
   duration?: string;
   durationAsked: boolean;
   scooter?: string;

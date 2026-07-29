@@ -60,5 +60,6 @@ export function getMemoryTrace(text: string, memory: ConversationMemory): string
   if (memory.onboardingPaused) used.push("onboardingPaused");
   if (memory.lastTopic) used.push("lastTopic");
   if (memory.lastDestinationContext) used.push("lastDestinationContext");
+  if (memory.stayingArea) used.push("stayingArea");
   return used;
 }

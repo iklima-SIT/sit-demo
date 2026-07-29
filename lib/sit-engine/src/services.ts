@@ -5,9 +5,11 @@ import type {
   KnowledgeService,
   LocationService,
   PlanService,
+  RecommendationService,
 } from "./types.js";
 import { createDestinationContextService as createStaticDestinationContextService } from "./destination-context.js";
 import { createStaticPlanService } from "./plans.js";
+import { createGoogleMapsRecommendationService as createStaticRecommendationService } from "./places.js";
 import type { KBCard } from "./knowledge.js";
 import { buildExpertAnswer, searchKBWithScore } from "./knowledge.js";
 import {
@@ -124,10 +126,15 @@ export function createDestinationContextService(): DestinationContextService {
   return createStaticDestinationContextService();
 }
 
+export function createRecommendationService(): RecommendationService {
+  return createStaticRecommendationService();
+}
+
 export function createConversationServices(overrides: Partial<ConversationServices> & { knowledgeCards?: KBCard[] } = {}): ConversationServices {
   return {
     events: overrides.events ?? createFallbackEventService(),
     destinationContext: overrides.destinationContext ?? createDestinationContextService(),
+    recommendations: overrides.recommendations ?? createRecommendationService(),
     knowledge: overrides.knowledge ?? createKnowledgeService(overrides.knowledgeCards ?? []),
     location: overrides.location ?? createStaticLocationService(),
     plans: overrides.plans ?? createPlaceholderPlanService(),

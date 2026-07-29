@@ -1,5 +1,6 @@
 import type { ConversationMemory, Intent, AssistantDecision } from "./types.js";
 import { resolveEventSearchFilters } from "./event-filters.js";
+import { isPlaceRecommendationRequest } from "./places.js";
 
 export type QueryIntent = Intent;
 
@@ -117,6 +118,7 @@ export function classifyIntent(text: string, memory: ConversationMemory = {}): I
   if (isDestinationContextFollowUp(text, memory)) return "follow_up";
   if (isDefinitionQuestion(text)) return "definition";
   if (isEventQuery(text)) return "live_event_search";
+  if (isPlaceRecommendationRequest(text)) return "place_recommendation";
   if (isLocationRequest(text)) return "location_request";
   if (isPracticalInformationRequest(text)) return "practical_information";
   if (memory.pendingEventFollowUp && isAffirmative(text)) return "follow_up";
@@ -133,6 +135,8 @@ export function decideIntent(text: string, memory: ConversationMemory = {}): Ass
     ? "events"
     : intent === "destination_context" || (intent === "follow_up" && memory.lastTopic === "destination_context")
       ? "destination_context"
+    : intent === "place_recommendation"
+      ? "recommendations"
     : intent === "location_request"
       ? "location"
       : intent === "planning"
@@ -147,6 +151,8 @@ export function decideIntent(text: string, memory: ConversationMemory = {}): Ass
       ? "call_live_events"
       : intent === "destination_context" || (intent === "follow_up" && memory.lastTopic === "destination_context")
         ? "resolve_destination_context"
+      : intent === "place_recommendation"
+        ? "recommend_places"
       : intent === "location_request"
         ? "resolve_location"
         : intent === "planning"

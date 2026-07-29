@@ -33,6 +33,7 @@ import type { EventSearchFilters } from "./event-filters.js";
 import { sanitizeAssistantMessages } from "./customer-output.js";
 import { extractLocationSubject, extractVenueFromText, findVenueLocationReference, venueNamesMatch } from "./venues.js";
 import { resolvePlanDuration } from "./plans.js";
+import { buildPlaceAreaQuestion, extractKohPhanganArea, inferPlaceCategory } from "./places.js";
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
 
@@ -246,6 +247,7 @@ function hydrateContextFromProfile(context: UserContext, profile: Partial<UserCo
     purpose: context.purpose ?? profile.purpose,
     purposeDetail: context.purposeDetail ?? profile.purposeDetail,
     groupComposition: context.groupComposition ?? profile.groupComposition,
+    stayingArea: context.stayingArea ?? profile.stayingArea,
     duration: context.duration ?? profile.duration,
     scooter: context.scooter ?? profile.scooter,
     sociability: context.sociability ?? profile.sociability,
@@ -375,6 +377,19 @@ export function decideAssistantAction(input: DecisionInput): AssistantDecision {
         requiredService: "events",
         memoryUpdates: { lastTopic: "events", ...informationModeUpdates() },
         debugReason: "Direct live event request takes priority over onboarding.",
+      };
+    } else if (intent === "place_recommendation") {
+      decision = {
+        intent,
+        action: "recommend_places",
+        answerMode: "service",
+        requiredService: "recommendations",
+        memoryUpdates: {
+          lastTopic: "place_recommendation",
+          currentMode: "local_expert",
+          onboardingPaused: onboardingIncomplete,
+        },
+        debugReason: "A nearby-place request selected contextual area discovery before recommendation.",
       };
     } else if (intent === "follow_up" && input.memory.lastTopic === "events") {
       decision = {
@@ -644,8 +659,8 @@ function resolveActiveContract(
   if (!task || !contract) return undefined;
 
   const globalIntent = classifyIntent(message, state.memory);
-  const startsNewObjective = globalIntent !== "general_chat"
-    && globalIntent !== "location_request";
+  const compatibleContractIntent = contract.expectedAnswer === "venue" && globalIntent === "location_request";
+  const startsNewObjective = globalIntent !== "general_chat" && !compatibleContractIntent;
   if (startsNewObjective) return undefined;
 
   if (isContractDecline(message)) {
@@ -700,6 +715,33 @@ function resolveActiveContract(
         onboardingPaused: onboardingIncomplete,
       },
       debugReason: "Kept the active venue contract open because the reply did not identify a venue or start a new objective.",
+    };
+    if (devTrace) {
+      decision.trace = {
+        ...buildTrace(message, state.memory, decision, false),
+        memoryUsed: [...getMemoryTrace(message, state.memory), "activeTask.contract"],
+      };
+    }
+    return decision;
+  }
+
+  if (contract.expectedAnswer === "area") {
+    const area = extractKohPhanganArea(message);
+    const onboardingIncomplete = !state.context.briefGenerated && state.memory.onboardingStage !== "complete";
+    const decision: AssistantDecision = {
+      intent: "follow_up",
+      action: "recommend_places",
+      answerMode: area ? "service" : "text",
+      requiredService: "recommendations",
+      memoryUpdates: {
+        ...(area ? { stayingArea: area, lastArea: area } : {}),
+        lastTopic: "place_recommendation",
+        currentMode: "local_expert",
+        onboardingPaused: onboardingIncomplete,
+      },
+      debugReason: area
+        ? "Consumed the area required by the active nearby-place recommendation contract."
+        : "Kept the nearby-place recommendation contract open because no island area was identified.",
     };
     if (devTrace) {
       decision.trace = {
@@ -776,6 +818,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
         purpose: explicitContext.purpose,
         purposeDetail: explicitContext.purposeDetail,
         groupComposition: explicitContext.groupComposition,
+        stayingArea: explicitContext.stayingArea,
         duration: explicitContext.duration,
         scooter: explicitContext.scooter,
         sociability: explicitContext.sociability,
@@ -886,6 +929,94 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
         reference: destinationContext.reference,
         destinationLocalTime: destinationContext.destinationLocalTime,
         matchedFromMemory: destinationContext.matchedFromMemory,
+      },
+    };
+  }
+
+  if (decision.action === "recommend_places") {
+    const activeRecommendationTask = workingState.activeTask?.kind === "place_recommendation"
+      ? workingState.activeTask
+      : undefined;
+    const originalQuery = activeRecommendationTask?.originalMessage ?? trimmed;
+    const category = inferPlaceCategory(originalQuery);
+    const area = extractKohPhanganArea(trimmed)
+      ?? workingState.memory.stayingArea
+      ?? workingState.context.stayingArea;
+
+    if (!area) {
+      const recommendationTask = activeRecommendationTask ?? createActiveTask(
+        workingState,
+        "place_recommendation",
+        "decision",
+        trimmed,
+        "Recommend nearby places without sending the traveler across the island",
+        "awaiting_clarification",
+      );
+      const messages = sanitizeAssistantMessages([{
+        type: "text" as const,
+        text: buildPlaceAreaQuestion(category),
+      }]);
+      workingState = {
+        ...workingState,
+        activeTask: {
+          ...recommendationTask,
+          status: "awaiting_clarification",
+          contract: {
+            expectedAnswer: "area",
+            reason: "The traveler's staying area materially changes nearby place recommendations.",
+            mode: "decision",
+            createdFromAction: "recommend_places",
+          },
+        },
+      };
+      workingState = appendAssistantMessages(workingState, messages, decision);
+      return {
+        messages,
+        suggestions: ["Sri Thanu", "Thong Sala", "Hinkong", "Baan Tai", "Haad Rin", "North coast"],
+        updatedState: workingState,
+        trace: decision.trace,
+        decision,
+      };
+    }
+
+    const recommendationTask = activeRecommendationTask ?? createActiveTask(
+      workingState,
+      "place_recommendation",
+      "decision",
+      originalQuery,
+      "Recommend nearby places without sending the traveler across the island",
+      "gathering_evidence",
+    );
+    workingState = { ...workingState, activeTask: recommendationTask };
+    const recommendation = await input.services.recommendations.recommend({
+      query: originalQuery,
+      area,
+      category,
+    }, workingState);
+    const messages = sanitizeAssistantMessages([{ type: "text" as const, text: recommendation.answer }]);
+    const userProfile = { ...workingState.memory.userProfile, stayingArea: recommendation.area };
+    workingState = {
+      ...workingState,
+      context: { ...workingState.context, stayingArea: recommendation.area },
+      activeTask: { ...recommendationTask, status: "refinable", contract: undefined },
+      memory: {
+        ...workingState.memory,
+        stayingArea: recommendation.area,
+        lastArea: recommendation.area,
+        lastTopic: "place_recommendation",
+        userProfile,
+      },
+    };
+    workingState = appendAssistantMessages(workingState, messages, decision);
+    return {
+      messages,
+      updatedState: workingState,
+      trace: decision.trace,
+      decision,
+      recommendation: {
+        area: recommendation.area,
+        category: recommendation.category,
+        googleMapsUrls: recommendation.googleMapsUrls,
       },
     };
   }

@@ -1402,3 +1402,118 @@ test("3-day planning output is identical on Web and WhatsApp", async () => {
   assert.equal(web.messages[0]!.text, whatsapp.messages[0]!.text);
   assert.deepEqual(web.updatedState.memory, whatsapp.updatedState.memory);
 });
+
+test("scooter rental asks for staying area before recommending nearby places", async () => {
+  let knowledgeCalls = 0;
+  const services = createConversationServices({
+    knowledge: {
+      async search() {
+        knowledgeCalls += 1;
+        return { answer: "WRONG: Full Moon" };
+      },
+    },
+  });
+
+  const first = await runConversationTurn({
+    message: "Where can I rent a scooter?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+
+  assert.equal(first.decision?.intent, "place_recommendation");
+  assert.equal(first.decision?.requiredService, "recommendations");
+  assert.equal(first.updatedState.activeTask?.kind, "place_recommendation");
+  assert.equal(first.updatedState.activeTask?.contract?.expectedAnswer, "area");
+  assert.equal(first.updatedState.activeTask?.originalMessage, "Where can I rent a scooter?");
+  assert.match(first.messages[0]!.text, /Which area are you staying in/i);
+  assert.doesNotMatch(first.messages[0]!.text, /Full Moon/i);
+  assert.equal(knowledgeCalls, 0);
+
+  const second = await runConversationTurn({
+    message: "Sri Thanu",
+    state: first.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(second.decision?.intent, "follow_up");
+  assert.equal(second.decision?.requiredService, "recommendations");
+  assert.equal(second.updatedState.memory.stayingArea, "Sri Thanu");
+  assert.equal(second.updatedState.context.stayingArea, "Sri Thanu");
+  assert.equal(second.updatedState.activeTask?.contract, undefined);
+  assert.match(second.messages[0]!.text, /Near Sri Thanu/i);
+  assert.match(second.messages[0]!.text, /google\.com\/maps\/search/i);
+  assert.match(second.messages[0]!.text, /scooter rental/i);
+  assert.doesNotMatch(second.messages[0]!.text, /Full Moon/i);
+  assert.equal(knowledgeCalls, 0);
+});
+
+test("remembered staying area avoids repeating contextual discovery", async () => {
+  const state = createInitialConversationState();
+  state.context.stayingArea = "Hinkong";
+  state.memory.stayingArea = "Hinkong";
+
+  const output = await runConversationTurn({
+    message: "Where can I rent a scooter?",
+    state,
+    channel: "web",
+    services: testServices(),
+  });
+
+  assert.match(output.messages[0]!.text, /Near Hinkong/i);
+  assert.doesNotMatch(output.messages[0]!.text, /Which area are you staying/i);
+  assert.equal(output.updatedState.activeTask?.status, "refinable");
+});
+
+test("a new factual location request replaces an unresolved area contract", async () => {
+  const first = await runConversationTurn({
+    message: "Where can I rent a scooter?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services: testServices(),
+  });
+  const location = await runConversationTurn({
+    message: "Where is Ethos Cafe?",
+    state: first.updatedState,
+    channel: "web",
+    services: testServices(),
+  });
+
+  assert.equal(location.decision?.intent, "location_request");
+  assert.equal(location.decision?.requiredService, "location");
+  assert.equal(location.updatedState.activeTask?.kind, "location");
+  assert.match(location.messages[0]!.text, /ETHOS Wholefood Cafe/i);
+});
+
+test("nearby recommendation contracts behave identically on Web and WhatsApp", async () => {
+  const services = testServices();
+  const webFirst = await runConversationTurn({
+    message: "Where can I rent a scooter?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const whatsappFirst = await runConversationTurn({
+    message: "Where can I rent a scooter?",
+    state: createInitialConversationState(),
+    channel: "whatsapp",
+    services,
+  });
+  const web = await runConversationTurn({
+    message: "Thong Sala",
+    state: webFirst.updatedState,
+    channel: "web",
+    services,
+  });
+  const whatsapp = await runConversationTurn({
+    message: "Thong Sala",
+    state: whatsappFirst.updatedState,
+    channel: "whatsapp",
+    services,
+  });
+
+  assert.equal(web.messages[0]!.text, whatsapp.messages[0]!.text);
+  assert.equal(web.updatedState.memory.stayingArea, whatsapp.updatedState.memory.stayingArea);
+  assert.equal(web.decision?.requiredService, whatsapp.decision?.requiredService);
+});

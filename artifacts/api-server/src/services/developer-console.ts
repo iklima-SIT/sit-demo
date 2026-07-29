@@ -34,6 +34,7 @@ export interface DeveloperConsolePayload {
     lastVenue?: string;
     lastEvent?: unknown;
     lastArea?: string;
+    stayingArea?: string;
     lastTopic?: string;
     lastDestinationContext?: unknown;
     userProfile?: unknown;
@@ -202,6 +203,13 @@ export function createDeveloperConsoleRecorder(services: ConversationServices): 
           result => !result.reference,
         ),
       },
+      recommendations: {
+        recommend: (request, context) => measure(
+          "RecommendationService",
+          () => services.recommendations.recommend(request, context),
+          result => result.googleMapsUrls.length === 0,
+        ),
+      },
       knowledge: {
         search: (query, context) => measure("KnowledgeService", () => services.knowledge.search(query, context), result => !result.answer),
       },
@@ -240,6 +248,7 @@ export function buildDeveloperConsolePayload(input: {
       lastVenue: memory.lastVenue,
       lastEvent: memory.lastEvent,
       lastArea: memory.lastArea,
+      stayingArea: memory.stayingArea,
       lastTopic: memory.lastTopic,
       lastDestinationContext: memory.lastDestinationContext,
       userProfile: memory.userProfile,
