@@ -20,6 +20,7 @@ import type {
   UserRequestContext,
   UserRequestMode,
   UserContext,
+  VenueLocationReference,
   SITResponse,
   SITBrief,
 } from "./types.js";
@@ -335,7 +336,11 @@ export function decideAssistantAction(input: DecisionInput): AssistantDecision {
       memoryUpdates: { pendingEventFollowUp: undefined, lastTopic: "events", ...informationModeUpdates() },
       debugReason: "Resolved category reply against pending event narrowing follow-up.",
     };
-  } else if (venueRef && (detectedIntent === "location_request" || venueRef.source === "memory" || bareVenueReference)) {
+  } else if (venueRef && (
+    detectedIntent === "location_request"
+    || venueRef.source === "memory"
+    || (bareVenueReference && detectedIntent !== "follow_up")
+  )) {
     decision = {
       intent: "location_request",
       action: "resolve_location",
@@ -560,6 +565,29 @@ function sameTimeWindow(left: EventReference["timeWindow"], right: EventSearchRe
   return Boolean(left && left.startTime === right.startTime && left.endTime === right.endTime);
 }
 
+function mergeAvailableEvents(
+  previous: EventListingReference[] | undefined,
+  current: EventListingReference[] | undefined,
+): EventListingReference[] | undefined {
+  if (!previous?.length) return current;
+  if (!current?.length) return previous;
+  const eventKey = (event: EventListingReference) => [event.title, event.venue, event.startTime]
+    .join("|")
+    .toLowerCase()
+    .replace(/[^a-z0-9|]+/g, " ")
+    .trim();
+  return [...new Map([...previous, ...current].map(event => [eventKey(event), event])).values()];
+}
+
+function mergeAvailableVenueReferences(
+  previous: VenueLocationReference[] | undefined,
+  current: VenueLocationReference[] | undefined,
+): VenueLocationReference[] | undefined {
+  if (!previous?.length) return current;
+  if (!current?.length) return previous;
+  return [...new Map([...previous, ...current].map(reference => [reference.id, reference])).values()];
+}
+
 function clearPendingUserRequest(memory: ConversationMemory): ConversationMemory {
   const { pendingUserRequest: _pendingUserRequest, ...rest } = memory;
   return rest;
@@ -681,9 +709,12 @@ function resolveActiveLocationRefinement(
   if (state.activeTask?.kind !== "location" || state.activeTask.contract) return undefined;
   if (classifyIntent(message, state.memory) !== "general_chat") return undefined;
 
+  const eventVenueReferences = state.memory.lastEvent?.availableVenueReferences
+    ?? state.memory.lastEvent?.venueReferences
+    ?? [];
   const recentVenueReferences = state.memory.lastVenueReference
-    ? [state.memory.lastVenueReference, ...(state.memory.lastEvent?.venueReferences ?? [])]
-    : state.memory.lastEvent?.venueReferences;
+    ? [state.memory.lastVenueReference, ...eventVenueReferences]
+    : eventVenueReferences;
   const knownVenue = extractVenueFromText(message);
   const eventVenue = findVenueLocationReference(message, recentVenueReferences);
   const isCorrection = /\b(?:not asking|i mean|i meant|instead)\b/i.test(message);
@@ -881,8 +912,12 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const mergedFilters = decision.intent === "follow_up"
       ? mergeEventFilters(previousFilters, resolvedEventRequest.filters, broadensEventSearch)
       : resolvedEventRequest.filters;
+    const previousAvailableVenueReferences = previousEvent?.availableVenueReferences
+      ?? previousEvent?.venueReferences;
+    const previousAvailableEvents = previousEvent?.availableEvents
+      ?? previousEvent?.events;
     const matchingVenueReference = mergedFilters?.venue
-      ? findVenueLocationReference(mergedFilters.venue, previousEvent?.venueReferences)
+      ? findVenueLocationReference(mergedFilters.venue, previousAvailableVenueReferences)
       : undefined;
     const filters = mergedFilters?.venue && matchingVenueReference
       ? { ...mergedFilters, venue: matchingVenueReference.name }
@@ -929,18 +964,18 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       && !filters.categories?.length
       && !filters.audience
       && !filters.area
-      && previousEvent?.events?.length
-      && sameTimeWindow(previousEvent.timeWindow, eventRequest.timeWindow),
+      && previousAvailableEvents?.length
+      && sameTimeWindow(previousEvent?.timeWindow, eventRequest.timeWindow),
     );
     const activeVenueEvents = canUseActiveVenueResults
-      ? previousEvent!.events!.filter(event => venueNamesMatch(event.venue, filters!.venue!))
+      ? previousAvailableEvents!.filter(event => venueNamesMatch(event.venue, filters!.venue!))
       : [];
     const eventResult: EventSearchResult = activeVenueEvents.length > 0
       ? {
           response: formatCachedVenueEvents(activeVenueEvents, matchingVenueReference?.name ?? filters!.venue!, eventRequest.timeWindow.label),
           fallback: false,
           events: activeVenueEvents,
-          venueReferences: previousEvent?.venueReferences?.filter(reference => venueNamesMatch(reference.name, filters!.venue!)),
+          venueReferences: previousAvailableVenueReferences?.filter(reference => venueNamesMatch(reference.name, filters!.venue!)),
           sources: activeVenueEvents.map(event => event.sourceUrl).filter((source): source is string => Boolean(source)),
           timeWindow: eventRequest.timeWindow,
         }
@@ -949,6 +984,16 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       ? eventResult.fallbackMessage ?? buildEventFallback(scope)
       : eventResult.response;
     const messages = sanitizeAssistantMessages([{ type: "text" as const, text }]);
+    const activeEventVenueReference = eventRequest.filters?.venue
+      ? eventResult.venueReferences?.find(reference => venueNamesMatch(reference.name, eventRequest.filters!.venue!))
+      : undefined;
+    const preservesAvailableResults = sameTimeWindow(previousEvent?.timeWindow, eventRequest.timeWindow);
+    const availableEvents = preservesAvailableResults
+      ? mergeAvailableEvents(previousAvailableEvents, eventResult.events)
+      : eventResult.events;
+    const availableVenueReferences = preservesAvailableResults
+      ? mergeAvailableVenueReferences(previousAvailableVenueReferences, eventResult.venueReferences)
+      : eventResult.venueReferences;
     workingState = {
       ...workingState,
       activeTask: workingState.activeTask
@@ -957,6 +1002,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       memory: {
         ...clearPendingUserRequest(workingState.memory),
         lastTopic: "events",
+        lastVenue: activeEventVenueReference?.id ?? workingState.memory.lastVenue,
+        lastVenueReference: activeEventVenueReference ?? workingState.memory.lastVenueReference,
         lastArea: eventRequest.filters?.area ?? workingState.memory.lastArea,
         lastTimeWindow: eventRequest.timeWindow,
         lastTimeLabel: eventRequest.timeWindow.label,
@@ -970,7 +1017,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
           timeWindow: eventRequest.timeWindow,
           filters: eventRequest.filters,
           events: eventResult.events,
+          availableEvents,
           venueReferences: eventResult.venueReferences,
+          availableVenueReferences,
         },
       },
     };

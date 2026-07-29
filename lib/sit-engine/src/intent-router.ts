@@ -33,6 +33,9 @@ export function isDirectQuestion(text: string): boolean {
 
 export function isLocationRequest(text: string): boolean {
   const t = text.toLowerCase();
+  if (/\b(?:road|route|ride|drive)\b.{0,80}\b(?:to|from)\b|\b(?:flat|steep|hilly|road condition)\b.{0,40}\broad\b/.test(t)) {
+    return true;
+  }
   if (/\b(how (do|can|to|do i) (get|reach|find|go)|how far|how long (does it take|to get)|get to|getting to|where is|where'?s|where can i find|directions? (to|from)|send .{0,20}(location|pin)|maps?|google maps|address|taxi|songthaew|scooter (to|from|how)|transport|shuttle|ferry|pier|airport|fly|flight|boat|distance|near|close to|located|from here|from there)\b/.test(t)) {
     return true;
   }

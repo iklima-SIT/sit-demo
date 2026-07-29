@@ -11,6 +11,14 @@ export interface VenueData {
     fromThongSala: string;
     fromSrithanu: string;
     walkNote?: string;
+    routeOptions?: Array<{
+      origin: string;
+      name: string;
+      conditions: string;
+      guidance: string;
+      sourceExpert?: string;
+      verifiedAt?: string;
+    }>;
   };
   localInsight: string;
 }
@@ -71,12 +79,30 @@ const VENUES: VenueData[] = [
   {
     id: "srithanu",
     name: "Srithanu",
-    aliases: ["srithanu"],
+    aliases: ["srithanu", "sri thanu", "siruthanu"],
     area: "West coast, 8 km north of Thong Sala",
     googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=Srithanu+Koh+Phangan",
     transportNotes: {
       fromThongSala: "~10 min by scooter / songthaew 80 THB",
       fromSrithanu: "You're here",
+      routeOptions: [
+        {
+          origin: "Thong Sala",
+          name: "Main road",
+          conditions: "Very flat and comfortable.",
+          guidance: "This is the easier option for a relaxed ride.",
+          sourceExpert: "SIT founder local knowledge",
+          verifiedAt: "2026-07-29",
+        },
+        {
+          origin: "Thong Sala",
+          name: "Beach road",
+          conditions: "Narrower, less comfortable, and a little dark in places, but without large cars or trucks.",
+          guidance: "Ride slowly and take your time.",
+          sourceExpert: "SIT founder local knowledge",
+          verifiedAt: "2026-07-29",
+        },
+      ],
     },
     localInsight: "The wellness, yoga, and coworking hub. Srithanu and Hinkong blend into each other.",
   },
@@ -265,6 +291,7 @@ export function venueNamesMatch(left: string, right: string): boolean {
     ? [leftTokens, rightTokens]
     : [rightTokens, leftTokens];
   return shorter.every(token => longer.some(candidate => {
+    if (`${token}s` === candidate || `${candidate}s` === token) return true;
     const tolerance = Math.min(token.length, candidate.length) >= 8 ? 2 : Math.min(token.length, candidate.length) >= 5 ? 1 : 0;
     return editDistance(token, candidate) <= tolerance;
   }));
@@ -288,6 +315,55 @@ export function findVenueLocationReference(
 
 export function buildVenueGoogleMapsSearchUrl(name: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} Koh Phangan`)}`;
+}
+
+export function buildVenueGoogleMapsDirectionsUrl(name: string, origin = "Thong Sala"): string {
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(`${origin} Koh Phangan`)}&destination=${encodeURIComponent(`${name} Koh Phangan`)}&travelmode=driving`;
+}
+
+export function isVenueRouteQuestion(text: string): boolean {
+  return /\b(road|route|way there|flat|steep|hilly|hill|easy|difficult|hard to reach|road condition|ride|drive)\b/i.test(text);
+}
+
+function routeOrigin(text: string): string {
+  if (/\b(?:thong\s*sala|tongsala)\b/i.test(text)) return "Thong Sala";
+  if (/\b(?:sri\s*thanu|srithanu)\b/i.test(text)) return "Sri Thanu";
+  if (/\bhaad\s*rin\b/i.test(text)) return "Haad Rin";
+  return "Thong Sala";
+}
+
+export function formatVenueRouteAnswer(
+  name: string,
+  question: string,
+  verifiedNote?: string,
+  routeOptions?: VenueData["transportNotes"]["routeOptions"],
+): string {
+  const origin = routeOrigin(question);
+  const matchingRouteOptions = routeOptions?.filter(option => option.origin === origin) ?? [];
+  const hasSteepWarning = Boolean(verifiedNote && /\bsteep|scooter access only|not walkable\b/i.test(verifiedNote));
+  const assessment = matchingRouteOptions.length > 0
+    ? [
+        `You have ${matchingRouteOptions.length} route options:`,
+        ...matchingRouteOptions.map(option => `• ${option.name}: ${option.conditions} ${option.guidance}`),
+      ]
+    : [
+        hasSteepWarning
+          ? `I wouldn't describe this route as flat and easy. ${verifiedNote}`
+          : verifiedNote
+            ? `I don't have a verified gradient or road-surface assessment for the whole route. What I do know: ${verifiedNote}`
+            : "I don't have verified road-condition details for this route, so I can't honestly confirm that it is flat and easy.",
+      ];
+
+  return [
+    `Road to ${name} from ${origin}:`,
+    "",
+    ...assessment,
+    "",
+    "Google Maps directions:",
+    buildVenueGoogleMapsDirectionsUrl(name, origin),
+    "",
+    "Check the final access road with the venue before riding, especially after rain.",
+  ].join("\n");
 }
 
 export function formatVenueLocationReference(reference: VenueLocationReference): string {

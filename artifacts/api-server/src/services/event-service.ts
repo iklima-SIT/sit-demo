@@ -560,6 +560,7 @@ function venueTextMatches(actual: string, requested: string): boolean {
 
   const actualTokens = actualNormalized.split(" ");
   return requestedNormalized.split(" ").every(token => actualTokens.some(candidate => {
+    if (`${token}s` === candidate || `${candidate}s` === token) return true;
     const tolerance = Math.min(token.length, candidate.length) >= 8 ? 2 : Math.min(token.length, candidate.length) >= 5 ? 1 : 0;
     return editDistance(token, candidate) <= tolerance;
   }));
@@ -746,21 +747,24 @@ function buildVenueLocationReferences(events: MergedEvent[]): VenueLocationRefer
 }
 
 function buildEventListingReferences(events: MergedEvent[]): EventListingReference[] {
-  return events.map(event => ({
-    id: event.sourceId ?? `${event.title}-${event.venue}-${event.startTime}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, ""),
-    title: event.title,
-    category: event.category,
-    venue: event.venue,
-    startTime: event.startTime,
-    endTime: event.endTime,
-    price: event.price,
-    primaryExperience: event.primaryExperience,
-    googleMapsUrl: event.googleMapsUrl,
-    sourceUrl: event.sourceLinks[0],
-  }));
+  return events.map(event => {
+    const identity = [event.sourceId ?? "event", event.title, event.venue, event.startTime].join("-");
+    return {
+      id: identity
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, ""),
+      title: event.title,
+      category: event.category,
+      venue: event.venue,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      price: event.price,
+      primaryExperience: event.primaryExperience,
+      googleMapsUrl: event.googleMapsUrl,
+      sourceUrl: event.sourceLinks[0],
+    };
+  });
 }
 
 function formatEventTimeRange(event: CalendarEvent): string {

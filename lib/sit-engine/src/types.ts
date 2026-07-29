@@ -196,7 +196,9 @@ export interface EventReference {
   timeWindow?: TimeWindow;
   filters?: EventSearchFilters;
   events?: EventListingReference[];
+  availableEvents?: EventListingReference[];
   venueReferences?: VenueLocationReference[];
+  availableVenueReferences?: VenueLocationReference[];
 }
 
 export type ConversationTaskKind = "event_search" | "location" | "knowledge" | "planning";

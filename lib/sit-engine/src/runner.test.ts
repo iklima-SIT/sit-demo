@@ -245,11 +245,12 @@ test("compound locations and venue event follow-ups stay on the newly named venu
           response: [
             "DJ Night: Mystic Bloom — 8:00 PM-11:00 PM, Tipsy Cocktail Bar",
             "Candlelit Sound Healing — 7:00 PM-9:00 PM, Ananda Yoga & Detox",
+            "Weaving Dreams — 7:30 PM-9:00 PM, Seeds of Dreams",
           ].join("\n"),
           fallback: false,
           events: [
             {
-              id: "mystic-bloom",
+              id: "shared-source",
               title: "DJ Night: Mystic Bloom",
               category: "Music and DJ sets",
               venue: "Tipsy Cocktail Bar",
@@ -260,7 +261,7 @@ test("compound locations and venue event follow-ups stay on the newly named venu
               sourceUrl: "https://todo.today/mystic-bloom",
             },
             {
-              id: "candlelit-sound-healing",
+              id: "shared-source",
               title: "Candlelit Sound Healing",
               category: "Yoga, wellness and breathwork",
               venue: "Ananda Yoga & Detox",
@@ -268,6 +269,17 @@ test("compound locations and venue event follow-ups stay on the newly named venu
               endTime: request.timeWindow.endTime,
               primaryExperience: "wellness",
               sourceUrl: "https://todo.today/candlelit-sound-healing",
+            },
+            {
+              id: "shared-source",
+              title: "Weaving Dreams",
+              category: "Workshops and community events",
+              venue: "Seeds of Dreams",
+              startTime: request.timeWindow.startTime,
+              endTime: request.timeWindow.endTime,
+              price: "Donation",
+              primaryExperience: "workshop",
+              sourceUrl: "https://todo.today/weaving-dreams",
             },
           ],
           venueReferences: [
@@ -282,6 +294,12 @@ test("compound locations and venue event follow-ups stay on the newly named venu
               name: "Ananda Yoga & Detox",
               aliases: ["Ananda Yoga"],
               googleMapsUrl: "https://maps.example/ananda",
+            },
+            {
+              id: "seeds-of-dreams",
+              name: "Seeds of Dreams",
+              aliases: ["Seeds of Dreams"],
+              googleMapsUrl: "https://maps.example/seeds-of-dreams",
             },
           ],
           timeWindow: request.timeWindow,
@@ -325,6 +343,34 @@ test("compound locations and venue event follow-ups stay on the newly named venu
   assert.doesNotMatch(answer, /Candlelit Sound Healing|island-wide event landscape/);
   assert.equal(eventServiceCalls, 1);
   assert.equal(tipsyEvent.updatedState.memory.lastEvent?.filters?.venue, "Tipsy Cocktail Bar");
+
+  const seedsEvent = await runConversationTurn({
+    message: "what is happening in seed of dreams tonight?",
+    state: tipsyEvent.updatedState,
+    channel: "web",
+    services,
+  });
+  const seedsAnswer = seedsEvent.messages[0]!.text;
+  assert.match(seedsAnswer, /At Seeds of Dreams tonight/i);
+  assert.match(seedsAnswer, /Weaving Dreams/);
+  assert.doesNotMatch(seedsAnswer, /DJ Night: Mystic Bloom|Candlelit Sound Healing/);
+  assert.equal(eventServiceCalls, 1);
+  assert.equal(seedsEvent.updatedState.memory.lastEvent?.availableEvents?.length, 3);
+  assert.equal(seedsEvent.updatedState.memory.lastVenue, "seeds-of-dreams");
+  assert.equal(seedsEvent.updatedState.memory.lastVenueReference?.name, "Seeds of Dreams");
+
+  const route = await runConversationTurn({
+    message: "is the road to this location flat and easy from tongsala?",
+    state: seedsEvent.updatedState,
+    channel: "web",
+    services,
+  });
+  const routeAnswer = route.messages[0]!.text;
+  assert.match(routeAnswer, /Road to Seeds of Dreams from Thong Sala/i);
+  assert.match(routeAnswer, /don't have verified road-condition details/i);
+  assert.match(routeAnswer, /google\.com\/maps\/dir/);
+  assert.doesNotMatch(routeAnswer, /Tipsy Cocktail Bar/);
+  assert.equal(eventServiceCalls, 1);
 });
 
 test("an explicitly named venue returns a Maps search instead of asking for the venue again", async () => {
@@ -340,6 +386,23 @@ test("an explicitly named venue returns a Maps search instead of asking for the 
   assert.match(output.messages[0]!.text, /google\.com\/maps\/search/);
   assert.doesNotMatch(output.messages[0]!.text, /Which place/i);
   assert.equal(output.updatedState.activeTask?.status, "refinable");
+});
+
+test("Srithanu route guidance distinguishes the main road from the beach road", async () => {
+  const output = await runConversationTurn({
+    message: "Is the road from Tongsala to Siruthanu flat and easy?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services: testServices(),
+  });
+
+  const answer = output.messages[0]!.text;
+  assert.equal(output.decision?.intent, "location_request");
+  assert.match(answer, /Road to Srithanu from Thong Sala/i);
+  assert.match(answer, /Main road: Very flat and comfortable/i);
+  assert.match(answer, /Beach road: Narrower, less comfortable, and a little dark/i);
+  assert.match(answer, /without large cars or trucks/i);
+  assert.match(answer, /Ride slowly/i);
 });
 
 test("a missing venue creates a blocking contract that consumes the next venue answer", async () => {

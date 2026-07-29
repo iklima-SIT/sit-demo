@@ -14,9 +14,11 @@ import {
   extractVenueFromText,
   findVenueLocationReference,
   formatVenueLocationReference,
+  formatVenueRouteAnswer,
   formatVenueSearchLocation,
   formatVenueCard,
   getVenueByReference,
+  isVenueRouteQuestion,
 } from "./venues.js";
 
 export function createKnowledgeService(kb: KBCard[]): KnowledgeService {
@@ -45,8 +47,15 @@ export function createStaticLocationService(): LocationService {
       const venueId = explicitVenueId ?? (explicitSubject ? undefined : memory.lastVenue);
       const venue = venueId ? getVenueByReference(venueId) : undefined;
       if (venue) {
+        const routeNote = /\b(?:thong\s*sala|tongsala)\b/i.test(query)
+          ? [venue.transportNotes.fromThongSala, venue.transportNotes.walkNote].filter(Boolean).join(" ")
+          : /\b(?:sri\s*thanu|srithanu)\b/i.test(query)
+            ? [venue.transportNotes.fromSrithanu, venue.transportNotes.walkNote].filter(Boolean).join(" ")
+            : venue.transportNotes.walkNote;
         return {
-          answer: formatVenueCard(venue),
+          answer: isVenueRouteQuestion(query)
+            ? formatVenueRouteAnswer(venue.name, query, routeNote, venue.transportNotes.routeOptions)
+            : formatVenueCard(venue),
           outcome: "resolved",
           venueId: venue.id,
           venueName: venue.name,
@@ -55,13 +64,18 @@ export function createStaticLocationService(): LocationService {
         };
       }
 
+      const eventVenueReferences = memory.lastEvent?.availableVenueReferences
+        ?? memory.lastEvent?.venueReferences
+        ?? [];
       const recentVenueReferences = memory.lastVenueReference
-        ? [memory.lastVenueReference, ...(memory.lastEvent?.venueReferences ?? [])]
-        : memory.lastEvent?.venueReferences;
+        ? [memory.lastVenueReference, ...eventVenueReferences]
+        : eventVenueReferences;
       const eventVenue = findVenueLocationReference(explicitSubject ?? venueId ?? query, recentVenueReferences);
       if (eventVenue) {
         return {
-          answer: formatVenueLocationReference(eventVenue),
+          answer: isVenueRouteQuestion(query)
+            ? formatVenueRouteAnswer(eventVenue.name, query)
+            : formatVenueLocationReference(eventVenue),
           outcome: "resolved",
           venueId: eventVenue.id,
           venueName: eventVenue.name,

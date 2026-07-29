@@ -508,6 +508,9 @@ test("EventService treats an explicit venue as a strict event constraint", async
           <br>🕒 7:00 PM - 9:00 PM
           <br>Candlelit Sound Healing
           <br>📍 Ananda Yoga & Detox
+          <br>🕒 7:30 PM - 9:00 PM
+          <br>Weaving Dreams
+          <br>📍 Seeds of Dreams
         </body></html>
       `, { status: 200 });
     }
@@ -517,6 +520,14 @@ test("EventService treats an explicit venue as a strict event constraint", async
   }) as typeof fetch;
 
   try {
+    const broadInput = createLiveEventSearchInput(
+      "What's happening tonight?",
+      new Date("2026-07-22T10:00:00.000Z"),
+    );
+    const broadResult = await searchLiveEvents(broadInput);
+    assert.equal(broadResult.events?.length, 3);
+    assert.equal(new Set(broadResult.events?.map(event => event.id)).size, 3);
+
     const input = createLiveEventSearchInput(
       "What is the event in tipsy coctail bar tonight?",
       new Date("2026-07-22T10:00:00.000Z"),
@@ -528,6 +539,15 @@ test("EventService treats an explicit venue as a strict event constraint", async
     assert.equal(result.diagnostics?.searchMode, "filtered");
     assert.equal(result.diagnostics?.appliedFilters?.venue, "tipsy coctail bar");
     assert.equal(result.events?.[0]?.venue, "Tipsy Cocktail Bar");
+
+    const singularVenueInput = createLiveEventSearchInput(
+      "What is happening in seed of dreams tonight?",
+      new Date("2026-07-22T10:00:00.000Z"),
+    );
+    const singularVenueResult = await searchLiveEvents(singularVenueInput);
+    assert.match(singularVenueResult.response ?? "", /Weaving Dreams/);
+    assert.doesNotMatch(singularVenueResult.response ?? "", /DJ Night: Mystic Bloom|Candlelit Sound Healing/);
+    assert.equal(singularVenueResult.events?.[0]?.venue, "Seeds of Dreams");
   } finally {
     globalThis.fetch = originalFetch;
   }
