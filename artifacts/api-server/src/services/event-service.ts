@@ -13,8 +13,14 @@ import {
   type EventClassification,
   type PrimaryExperience,
 } from "@workspace/sit-engine";
+import {
+  TODO_TODAY_HOME_URL,
+  fetchTodoTodayEvents,
+} from "./todo-today-source";
 
 export const TRUSTED_EVENT_SOURCES = [
+  TODO_TODAY_HOME_URL,
+  "https://t.me/s/phangantoday",
   "https://phangan.events/",
   "https://phangan.events/events-parties-calendar/",
   "https://www.instagram.com/phangan.events/",
@@ -29,7 +35,6 @@ export const TRUSTED_EVENT_SOURCES = [
 
 const NO_TRUSTED_EVENT_FOUND = "NO_TRUSTED_EVENT_FOUND";
 const PHANGAN_TODAY_TELEGRAM = "https://t.me/s/phangantoday";
-const PHANGAN_TODAY_APP = "https://todo.today/kpg";
 const PHANGAN_EVENTS_HOME = "https://phangan.events/";
 const PHANGAN_EVENTS_CALENDAR = "https://phangan.events/events-parties-calendar/";
 
@@ -44,6 +49,8 @@ interface CalendarEvent {
   sourceName?: string;
   sourceUrl?: string;
   confidence?: "high" | "medium" | "low";
+  googleMapsUrl?: string;
+  sourceCategoryId?: string;
 }
 
 interface EventSourceConfig {
@@ -62,6 +69,7 @@ interface SourceResult {
   status: "success" | "failed";
   events: CalendarEvent[];
   reason?: string;
+  warning?: string;
 }
 
 interface MergedEvent extends CalendarEvent, EventClassification {
@@ -71,14 +79,24 @@ interface MergedEvent extends CalendarEvent, EventClassification {
 
 export const APPROVED_EVENT_SOURCE_REGISTRY: EventSourceConfig[] = [
   {
-    id: "phangan-today",
-    name: "Phangan Today / Todo.Today Koh Phangan",
-    url: PHANGAN_TODAY_TELEGRAM,
+    id: "todo-today",
+    name: "Todo.Today Koh Phangan",
+    url: TODO_TODAY_HOME_URL,
     category: "major island event pages",
     trustLevel: "primary",
+    expectedPostingStyle: "Structured live calendar with event IDs, categories, times, venues, prices, maps, and event links.",
+    active: true,
+    notes: "Primary broad island calendar. Attempted independently on every live event search.",
+  },
+  {
+    id: "phangan-today-telegram",
+    name: "Phangan Today Telegram",
+    url: PHANGAN_TODAY_TELEGRAM,
+    category: "major island event pages",
+    trustLevel: "trusted",
     expectedPostingStyle: "Daily Telegram digest with time, title, venue, price, and Todo.Today links.",
     active: true,
-    notes: "Primary same-day broad island discovery source.",
+    notes: "Independent digest source and fallback evidence; it does not stand in for the full Todo.Today calendar.",
   },
   {
     id: "phangan-events",
@@ -546,6 +564,7 @@ function evaluateEventCandidate(event: MergedEvent, input: EventSearchRequest): 
   const classificationFields = {
     primaryExperience: classification.primaryExperience,
     secondaryTags: classification.secondaryTags,
+    humanNeeds: classification.humanNeeds,
   };
 
   if (!eventOverlapsWindow(event, input.timeWindow)) {
@@ -682,7 +701,8 @@ function formatEventTimeRange(event: CalendarEvent): string {
   return `${timeFormatter.format(startDate)}–${timeFormatter.format(endDate)}${endSuffix}`;
 }
 
-function formatMergedEventLandscape(events: MergedEvent[], window: NormalizedEventTimeWindow, incomplete: boolean): { response: string; categories: string[] } {
+function formatMergedEventLandscape(events: MergedEvent[], input: EventSearchRequest, incomplete: boolean): { response: string; categories: string[] } {
+  const window = input.timeWindow;
   const grouped = new Map<string, MergedEvent[]>();
   for (const event of events) {
     const category = categoryForEvent(event);
@@ -704,12 +724,15 @@ function formatMergedEventLandscape(events: MergedEvent[], window: NormalizedEve
   const lines = [
     incomplete
       ? `I couldn't fully verify ${window.label.toLowerCase()} from every live source yet, but I found these verified listings:`
-      : `Here's the verified island-wide event landscape for ${window.label}:`,
+      : input.resultMode === "complete"
+        ? `Here are all verified island-wide events I found for ${window.label}:`
+        : `Here's the verified island-wide event landscape for ${window.label}:`,
   ];
 
   for (const category of categories) {
     lines.push("", category);
-    for (const event of (grouped.get(category) ?? []).slice(0, 5)) {
+    const categoryEvents = grouped.get(category) ?? [];
+    for (const event of input.resultMode === "complete" ? categoryEvents : categoryEvents.slice(0, 5)) {
       const price = event.price ? ` · ${event.price}` : "";
       lines.push(`• ${event.title} — ${formatEventTimeRange(event)}, ${event.venue}${price}`);
     }
@@ -743,7 +766,11 @@ function formatFilteredEventLandscape(
   const lines: string[] = [];
   if (name) lines.push(`Welcome to Koh Phangan, ${name}.`, "");
   const musicOnly = input.filters?.categories?.length === 1 && input.filters.categories[0] === "music";
-  lines.push(musicOnly
+  lines.push(input.resultMode === "complete"
+    ? incomplete
+      ? `I couldn't verify every live source, but these are all ${description} events I could verify for ${input.timeWindow.label.toLowerCase()}:`
+      : `These are all ${description} events I found for ${input.timeWindow.label.toLowerCase()}:`
+    : musicOnly
     ? incomplete
       ? `I couldn't verify every live source, but these are the ${input.timeWindow.label.toLowerCase()} music-focused events I could verify:`
       : `These are ${input.timeWindow.label.toLowerCase()}'s music-focused events:`
@@ -753,7 +780,8 @@ function formatFilteredEventLandscape(
 
   for (const category of categories) {
     lines.push("", category);
-    for (const event of (grouped.get(category) ?? []).slice(0, 5)) {
+    const categoryEvents = grouped.get(category) ?? [];
+    for (const event of input.resultMode === "complete" ? categoryEvents : categoryEvents.slice(0, 5)) {
       const price = event.price ? ` · ${event.price}` : "";
       lines.push(`• ${event.title} — ${formatEventTimeRange(event)}, ${event.venue}${price}`);
     }
@@ -769,7 +797,7 @@ function formatFilteredEventLandscape(
   return { response: lines.join("\n"), categories };
 }
 
-function parseTodoTodayEvents(html: string, window: NormalizedEventTimeWindow): CalendarEvent[] {
+function parsePhanganTodayTelegramEvents(html: string, window: NormalizedEventTimeWindow): CalendarEvent[] {
   const lines = lineTextFromHtml(html);
   const targetDate = localDateKey(new Date(window.startTime));
   const dateLinePattern = /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s+([A-Z][a-z]+)\s+(\d{1,2}),\s+(20\d{2})/;
@@ -791,7 +819,7 @@ function parseTodoTodayEvents(html: string, window: NormalizedEventTimeWindow): 
     if (!sawAnyDate || inTargetSegment) segment.push(line);
   }
 
-  const source = sourceById("phangan-today");
+  const source = sourceById("phangan-today-telegram");
   const events: CalendarEvent[] = [];
   const scan = segment.length ? segment : lines;
 
@@ -866,23 +894,50 @@ async function fetchHtmlSource(source: EventSourceConfig, parse: (html: string) 
   return { source, status: "failed", events: [], reason: lastReason || `Could not read ${source.name}` };
 }
 
+async function fetchTodoTodaySource(input: EventSearchRequest): Promise<SourceResult> {
+  const source = sourceById("todo-today");
+  try {
+    const result = await fetchTodoTodayEvents(input.timeWindow);
+    return {
+      source,
+      status: "success",
+      events: result.events.map(event => eventWithSource({
+        title: event.title,
+        category: event.category,
+        venue: event.venue,
+        startTime: event.startTime,
+        endTime: event.endTime,
+        price: event.price,
+        googleMapsUrl: event.googleMapsUrl,
+        sourceCategoryId: event.sourceCategoryId,
+      }, source, event.sourceUrl)),
+      warning: result.warning,
+    };
+  } catch (error) {
+    return {
+      source,
+      status: "failed",
+      events: [],
+      reason: error instanceof Error ? error.message : "Could not read Todo.Today",
+    };
+  }
+}
+
 async function collectApprovedEvents(input: EventSearchRequest): Promise<SourceResult[]> {
-  const phanganToday = sourceById("phangan-today");
+  const phanganToday = sourceById("phangan-today-telegram");
   const phanganEvents = sourceById("phangan-events");
-  const results: SourceResult[] = [];
-
-  results.push(await fetchHtmlSource(
-    phanganToday,
-    html => parseTodoTodayEvents(html, input.timeWindow),
-    [PHANGAN_TODAY_APP],
-  ));
-  results.push(await fetchHtmlSource(
-    phanganEvents,
-    html => parsePhanganEventsCalendar(html, input.timeWindow),
-    [PHANGAN_EVENTS_CALENDAR],
-  ));
-
-  return results;
+  return Promise.all([
+    fetchTodoTodaySource(input),
+    fetchHtmlSource(
+      phanganToday,
+      html => parsePhanganTodayTelegramEvents(html, input.timeWindow),
+    ),
+    fetchHtmlSource(
+      phanganEvents,
+      html => parsePhanganEventsCalendar(html, input.timeWindow),
+      [PHANGAN_EVENTS_CALENDAR],
+    ),
+  ]);
 }
 
 export function validateEventAnswerWindow(
@@ -992,6 +1047,7 @@ function validateEventAnswerConstraints(answer: string | null, input: EventSearc
       event: line.trim(),
       primaryExperience: classification.primaryExperience,
       secondaryTags: classification.secondaryTags,
+      humanNeeds: classification.humanNeeds,
       matchRole: included ? "primary" : secondaryMatch ? "secondary" : "none",
       included,
       reason: included
@@ -1074,6 +1130,9 @@ export function buildEventSearchQuery(input: EventSearchRequest): string {
     `Calendar window in plain English: ${input.timeWindow.label} from ${input.timeWindow.startTime} to ${input.timeWindow.endTime} (${input.timeWindow.timezone}).`,
     `Date/time expressions have already been normalized before this request. Do not reinterpret temporal words from the user wording.`,
     `Event intent after date normalization: "${input.queryText}".`,
+    input.resultMode === "complete"
+      ? "The traveler explicitly requested a complete list. Return every verified matching event, not a curated subset."
+      : "Return a focused set of the strongest verified matches.",
     filterDescription ? `Explicit event constraints: ${filterDescription}.` : "No explicit category, audience, or area constraint was provided.",
     input.originalText ? `Original user wording, secondary context only: "${input.originalText}".` : "",
     `Use only these trusted local Instagram/event sources for verification: ${(input.sourceConstraints?.length ? input.sourceConstraints : TRUSTED_EVENT_SOURCES).join(", ")}.`,
@@ -1104,6 +1163,9 @@ function buildDiagnostics(
     .filter(result => result.status === "failed")
     .map(result => ({ source: result.source.name, reason: result.reason ?? "Source failed" }));
   const successful = sourceResults.filter(result => result.status === "success");
+  const warnings = sourceResults
+    .filter(result => result.warning)
+    .map(result => ({ source: result.source.name, warning: result.warning! }));
 
   return {
     destination: input.clock.destination,
@@ -1121,9 +1183,11 @@ function buildDiagnostics(
       : undefined,
     requestMode: "information",
     searchMode,
+    resultMode: input.resultMode,
     sourcesAttempted: sourceResults.map(result => result.source.name),
     sourcesSuccessful: successful.map(result => result.source.name),
     sourcesFailed: failed,
+    sourceWarnings: warnings,
     rawResultCountBySource: Object.fromEntries(sourceResults.map(result => [result.source.name, result.events.length])),
     mergedResultCount: mergedCandidates.length,
     duplicatesRemoved,
@@ -1147,7 +1211,7 @@ export async function searchLiveEvents(input: EventSearchRequest, apiKey?: strin
   const formatted = events.length > 0
     ? searchMode === "filtered"
       ? formatFilteredEventLandscape(events, input, incomplete, constrained.secondaryCandidateCount)
-      : formatMergedEventLandscape(events, input.timeWindow, incomplete)
+      : formatMergedEventLandscape(events, input, incomplete)
     : undefined;
   const diagnostics = buildDiagnostics(
     input,

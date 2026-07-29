@@ -127,6 +127,7 @@ export {
   classifyEventExperience,
   type EventClassification,
   type EventClassificationInput,
+  type EventHumanNeed,
   type EventSecondaryTag,
   type PrimaryExperience,
 } from "./event-classification.js";

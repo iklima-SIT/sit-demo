@@ -293,7 +293,7 @@ test("EventService returns phangan.events results without requiring Exa", async 
   }
 });
 
-test("EventService merges broad same-day Todo.Today and phangan.events results with diagnostics", async () => {
+test("EventService merges broad same-day Telegram and phangan.events results with diagnostics", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url) => {
     if (String(url).includes("phangantoday")) {
@@ -321,8 +321,18 @@ test("EventService merges broad same-day Todo.Today and phangan.events results w
         </body></html>
       `, { status: 200 });
     }
-    if (String(url).includes("todo.today")) {
-      return new Response("<html>fallback app page</html>", { status: 200 });
+    if (String(url) === "https://todo.today/koh-phangan/") {
+      return new Response(`
+        <section
+          data-channel="koh-phangan"
+          data-rest-url="https://todo.today/api/todo-today/v1/events"
+          data-rest-nonce="test-nonce"
+          id="tt-app"
+        ></section>
+      `, { status: 200 });
+    }
+    if (String(url).includes("/api/todo-today/v1/events")) {
+      return Response.json({ filters: { categories: [] }, sections: [] });
     }
     throw new Error(`Unexpected fetch ${String(url)}`);
   }) as typeof fetch;
@@ -343,6 +353,75 @@ test("EventService merges broad same-day Todo.Today and phangan.events results w
     assert.equal(result.diagnostics?.duplicatesRemoved, 0);
     assert.deepEqual(result.diagnostics?.sourcesFailed, []);
     assert.doesNotMatch(result.response ?? "", /\b(?:high|medium|low) confidence\b/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Todo.Today is an independent primary source and explicit all returns every matching event", async () => {
+  const originalFetch = globalThis.fetch;
+  const todoEvents = Array.from({ length: 6 }, (_, index) => ({
+    id: index + 1,
+    short_name: `Yoga Class ${index + 1}`,
+    link: `https://todo.today/koh-phangan/2026/07/29/yoga-class-${index + 1}`,
+    start_time: `${index + 1}:00 PM`,
+    end_time: `${index + 2}:00 PM`,
+    venue: `Yoga Shala ${index + 1}`,
+    category_id: 1,
+    price_label: "฿400",
+  }));
+  globalThis.fetch = (async (url) => {
+    const value = String(url);
+    if (value === "https://todo.today/koh-phangan/") {
+      return new Response(`
+        <section
+          data-channel="koh-phangan"
+          data-rest-url="https://todo.today/api/todo-today/v1/events"
+          data-rest-nonce="test-nonce"
+          id="tt-app"
+        ></section>
+      `, { status: 200 });
+    }
+    if (value.includes("/api/todo-today/v1/events")) {
+      return Response.json({
+        filters: { categories: [{ id: 1, name: "Wellness", short_name: "Wellness" }] },
+        sections: [{ key: "afternoon", events: todoEvents }],
+      });
+    }
+    if (value.includes("phangantoday")) {
+      return new Response(`
+        Wednesday Jul 29, 2026
+        <br>🕒 7:00 PM - 8:00 PM
+        <br>Telegram Yin Yoga
+        <br>📍 Telegram Shala
+        <br>💰 400 THB
+      `, { status: 200 });
+    }
+    if (value.includes("phangan.events")) return new Response("<html>No matches</html>", { status: 200 });
+    throw new Error(`Unexpected fetch ${value}`);
+  }) as typeof fetch;
+
+  try {
+    const input = createLiveEventSearchInput(
+      "Show me all yoga events today",
+      new Date("2026-07-29T04:00:00.000Z"),
+    );
+    const result = await searchLiveEvents(input);
+
+    for (let index = 1; index <= 6; index++) assert.match(result.response ?? "", new RegExp(`Yoga Class ${index}`));
+    assert.match(result.response ?? "", /Telegram Yin Yoga/);
+    assert.equal(result.diagnostics?.resultMode, "complete");
+    assert.deepEqual(result.diagnostics?.sourcesAttempted, [
+      "Todo.Today Koh Phangan",
+      "Phangan Today Telegram",
+      "phangan.events calendar",
+    ]);
+    assert.deepEqual(result.diagnostics?.rawResultCountBySource, {
+      "Todo.Today Koh Phangan": 6,
+      "Phangan Today Telegram": 1,
+      "phangan.events calendar": 0,
+    });
+    assert.equal(result.diagnostics?.filterDecisions?.find(item => item.event.includes("Yoga Class 1"))?.humanNeeds?.includes("reset"), true);
   } finally {
     globalThis.fetch = originalFetch;
   }

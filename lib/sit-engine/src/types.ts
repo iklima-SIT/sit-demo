@@ -1,5 +1,6 @@
 import type { EventSearchRequest, TimeWindow } from "./time-resolver.js";
 import type { EventCategoryFilter, EventSearchFilters } from "./event-filters.js";
+import type { EventHumanNeed } from "./event-classification.js";
 
 export type Intent =
   | "live_event_search"
@@ -74,11 +75,16 @@ export interface EventSearchDiagnostics {
   };
   requestMode?: "information" | "decision";
   searchMode?: "broad" | "filtered";
+  resultMode?: "focused" | "complete";
   sourcesAttempted?: string[];
   sourcesSuccessful?: string[];
   sourcesFailed?: Array<{
     source: string;
     reason: string;
+  }>;
+  sourceWarnings?: Array<{
+    source: string;
+    warning: string;
   }>;
   rawResultCountBySource?: Record<string, number>;
   mergedResultCount?: number;
@@ -96,6 +102,7 @@ export interface EventSearchDiagnostics {
     endTime?: string;
     primaryExperience?: string;
     secondaryTags?: string[];
+    humanNeeds?: EventHumanNeed[];
     matchRole?: "primary" | "secondary" | "none";
     included: boolean;
     reason: string;

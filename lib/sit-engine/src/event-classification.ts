@@ -31,10 +31,21 @@ export type EventSecondaryTag =
   | "nature"
   | "coworking";
 
+export type EventHumanNeed =
+  | "burnout"
+  | "relaxation"
+  | "healing"
+  | "celebration"
+  | "connection"
+  | "belonging"
+  | "reset";
+
 export interface EventClassification {
   primaryExperience: PrimaryExperience;
   secondaryTags: EventSecondaryTag[];
+  humanNeeds: EventHumanNeed[];
   classificationReason: string;
+  humanNeedReason: string;
 }
 
 export interface EventClassificationInput {
@@ -60,13 +71,13 @@ function classifyPrimary(text: string, sourceCategory: string): Pick<EventClassi
   if (/\b(breathwork|holotropic breath|rebirthing breath|breath journey)\b/.test(text)) {
     return { primaryExperience: "breathwork", classificationReason: "Breathwork is the central activity." };
   }
-  if (/\b(yoga|vinyasa|yin yoga|ashtanga|hatha|aerial yoga)\b/.test(text)) {
+  if (/\b(yoga|vinyasa(?: flow)?|yin(?: (?:yoga|and restorative))?|restorative yoga|ashtanga|hatha|aerial yoga)\b/.test(text)) {
     return { primaryExperience: "yoga", classificationReason: "Yoga is the central activity." };
   }
   if (/\b(qi-?gong|qigong|movement practice|somatic movement|dance class|contact dance|tribal dance|mobility class)\b/.test(text)) {
     return { primaryExperience: "movement", classificationReason: "Guided movement is the central activity." };
   }
-  if (/\b(sound healing|meditation|sauna|ice bath|wellness|healing session|massage|tre®|nervous system)\b/.test(text)) {
+  if (/\b(sound healing|sound bath|meditation|sauna|ice bath|wellness|healing session|massage|tre®|nervous system)\b/.test(text)) {
     return { primaryExperience: "wellness", classificationReason: "The event is centered on a wellness practice." };
   }
   if (/\b(beach party|jungle party|party|rave|nightlife|club night|full moon|festival)\b/.test(text)) {
@@ -91,12 +102,15 @@ function classifyPrimary(text: string, sourceCategory: string): Pick<EventClassi
     return { primaryExperience: "community", classificationReason: "Community participation is the central experience." };
   }
 
-  if (/\blive music\b/.test(sourceCategory)) return { primaryExperience: "music", classificationReason: "The trusted source classifies this as live music." };
-  if (/\bparty|festival\b/.test(sourceCategory)) return { primaryExperience: "party", classificationReason: "The trusted source classifies this as a party or festival." };
+  if (/\bmusic\b/.test(sourceCategory)) return { primaryExperience: "music", classificationReason: "The trusted source classifies this as music." };
+  if (/\bpart(?:y|ies)|nightlife|festival\b/.test(sourceCategory)) return { primaryExperience: "party", classificationReason: "The trusted source classifies this as a party or nightlife event." };
   if (/\byoga\b/.test(sourceCategory)) return { primaryExperience: "yoga", classificationReason: "The trusted source classifies this as yoga." };
   if (/\bwellness\b/.test(sourceCategory)) return { primaryExperience: "wellness", classificationReason: "The trusted source classifies this as wellness." };
-  if (/\bworkshop\b/.test(sourceCategory)) return { primaryExperience: "workshop", classificationReason: "The trusted source classifies this as a workshop." };
-  if (/\bcommunity|market\b/.test(sourceCategory)) return { primaryExperience: "community", classificationReason: "The trusted source classifies this as a community event." };
+  if (/\bdance|movement|sports?|fitness\b/.test(sourceCategory)) return { primaryExperience: "movement", classificationReason: "The trusted source classifies this as movement or fitness." };
+  if (/\bconscious|spiritual|tantra\b/.test(sourceCategory)) return { primaryExperience: "spiritual_practice", classificationReason: "The trusted source classifies this as a conscious or spiritual practice." };
+  if (/\bworkshop|learning|discussion|arts?|creativity\b/.test(sourceCategory)) return { primaryExperience: "workshop", classificationReason: "The trusted source classifies this as a learning or creative experience." };
+  if (/\bcommunity|social|relationships?|connection|market\b/.test(sourceCategory)) return { primaryExperience: "community", classificationReason: "The trusted source classifies this as a social or community event." };
+  if (/\bfood|drink\b/.test(sourceCategory)) return { primaryExperience: "food", classificationReason: "The trusted source classifies this as a food or drink experience." };
   return { primaryExperience: "other", classificationReason: "No dominant experience is explicit enough to classify more narrowly." };
 }
 
@@ -119,12 +133,41 @@ function classifySecondaryTags(text: string): EventSecondaryTag[] {
   return unique(tags);
 }
 
+function classifyHumanNeeds(primaryExperience: PrimaryExperience): Pick<EventClassification, "humanNeeds" | "humanNeedReason"> {
+  const mapping: Record<PrimaryExperience, EventHumanNeed[]> = {
+    music: ["celebration", "connection"],
+    party: ["celebration", "connection", "belonging"],
+    wellness: ["burnout", "relaxation", "healing", "reset"],
+    yoga: ["burnout", "relaxation", "healing", "reset"],
+    breathwork: ["relaxation", "healing", "reset"],
+    movement: ["healing", "connection", "reset"],
+    spiritual_practice: ["healing", "connection", "belonging", "reset"],
+    conscious_dance: ["celebration", "connection", "belonging", "reset"],
+    workshop: ["connection", "belonging"],
+    community: ["connection", "belonging"],
+    food: ["celebration", "connection"],
+    nature: ["burnout", "relaxation", "reset"],
+    coworking: ["connection", "belonging"],
+    practical: [],
+    other: [],
+  };
+  const humanNeeds = mapping[primaryExperience];
+  return {
+    humanNeeds,
+    humanNeedReason: humanNeeds.length > 0
+      ? `${primaryExperience} experiences can support ${humanNeeds.join(", ")}.`
+      : "The event does not provide enough evidence for a human-need classification.",
+  };
+}
+
 export function classifyEventExperience(input: EventClassificationInput): EventClassification {
   const sourceCategory = (input.sourceCategory ?? "").toLowerCase();
-  const contentText = `${input.title} ${input.venue ?? ""}`.toLowerCase();
-  const primary = classifyPrimary(contentText, sourceCategory);
+  const titleText = input.title.toLowerCase();
+  const contentText = `${titleText} ${input.venue ?? ""}`.toLowerCase();
+  const primary = classifyPrimary(titleText, sourceCategory);
   return {
     ...primary,
     secondaryTags: classifySecondaryTags(`${contentText} ${sourceCategory}`),
+    ...classifyHumanNeeds(primary.primaryExperience),
   };
 }

@@ -56,11 +56,16 @@ export interface DeveloperConsolePayload {
     providerQueryWindow?: string;
     requestMode?: string;
     searchMode?: string;
+    resultMode?: string;
     sourcesAttempted?: string[];
     sourcesSuccessful?: string[];
     sourcesFailed?: Array<{
       source: string;
       reason: string;
+    }>;
+    sourceWarnings?: Array<{
+      source: string;
+      warning: string;
     }>;
     rawResultCountBySource?: Record<string, number>;
     mergedResultCount?: number;
@@ -72,6 +77,7 @@ export interface DeveloperConsolePayload {
       endTime?: string;
       primaryExperience?: string;
       secondaryTags?: string[];
+      humanNeeds?: string[];
       matchRole?: "primary" | "secondary" | "none";
       included: boolean;
       reason: string;
@@ -243,9 +249,11 @@ export function buildDeveloperConsolePayload(input: {
       providerQueryWindow: input.output.event?.providerQueryWindow,
       requestMode: input.output.event?.diagnostics?.requestMode,
       searchMode: input.output.event?.diagnostics?.searchMode,
+      resultMode: input.output.event?.diagnostics?.resultMode,
       sourcesAttempted: input.output.event?.diagnostics?.sourcesAttempted,
       sourcesSuccessful: input.output.event?.diagnostics?.sourcesSuccessful,
       sourcesFailed: input.output.event?.diagnostics?.sourcesFailed,
+      sourceWarnings: input.output.event?.diagnostics?.sourceWarnings,
       rawResultCountBySource: input.output.event?.diagnostics?.rawResultCountBySource,
       mergedResultCount: input.output.event?.diagnostics?.mergedResultCount,
       duplicatesRemoved: input.output.event?.diagnostics?.duplicatesRemoved,

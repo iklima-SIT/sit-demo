@@ -59,12 +59,20 @@ export interface DeveloperConsolePayload {
     timezone?: string;
     resolverConfidence?: number;
     providerQueryWindow?: string;
+    requestMode?: string;
+    searchMode?: string;
+    resultMode?: string;
+    sourceWarnings?: Array<{
+      source: string;
+      warning: string;
+    }>;
     filterDecisions?: Array<{
       event: string;
       startTime?: string;
       endTime?: string;
       primaryExperience?: string;
       secondaryTags?: string[];
+      humanNeeds?: string[];
       matchRole?: "primary" | "secondary" | "none";
       included: boolean;
       reason: string;

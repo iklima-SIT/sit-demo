@@ -45,6 +45,7 @@ export interface EventSearchRequest {
   queryText: string;
   timeWindow: TimeWindow;
   clock: DestinationClockSnapshot;
+  resultMode: "focused" | "complete";
   filters?: EventSearchFilters;
   userContext?: unknown;
   sourceConstraints?: string[];
@@ -391,6 +392,10 @@ export function createEventSearchRequest(
   metadata: { browserTimezone?: string } = {},
 ): EventSearchRequest {
   const timeWindow = resolveEventTimeWindow(query, now);
+  const normalized = query.toLowerCase();
+  const completeResultRequest = /\ball\b(?=[^.!?]{0,50}\bevents?\b)/.test(normalized)
+    || /\bevery\b(?=[^.!?]{0,50}\bevent\b)/.test(normalized)
+    || /\bcomplete\s+(?:event\s+)?list\b|\bfull\s+(?:event\s+)?list\b/.test(normalized);
   return {
     queryText: stripNaturalLanguageDate(query) || "Koh Phangan events",
     timeWindow,
@@ -401,6 +406,7 @@ export function createEventSearchRequest(
       browserTimezone: metadata.browserTimezone,
       filteringCutoff: resolveEventFilteringCutoff(timeWindow, now),
     },
+    resultMode: completeResultRequest ? "complete" : "focused",
     filters: resolveEventSearchFilters(query),
     originalText: query,
   };
