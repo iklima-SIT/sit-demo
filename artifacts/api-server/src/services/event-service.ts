@@ -1192,8 +1192,14 @@ export function buildEventFallbackMessage(
   }
   if (label === "tonight") {
     return [
-      "I can't verify anything reliable for tonight from the trusted local event accounts.",
-      "Want me to check tomorrow too?",
+      "I couldn't verify a live event listing for tonight, so I won't present one as confirmed.",
+      "",
+      "You still have three solid plans:",
+      "• Relaxed and social — Hinkong: food, music, and sunset atmosphere at Alcove or Cintamani.",
+      "• Easy and flexible — start with dinner around the Hinkong–Thong Sala corridor, then choose a nearby social spot without committing to an all-night party.",
+      "• Quiet or romantic — a low-tide sunset picnic at Hinkong; if it's already dark, switch to dinner or drinks there.",
+      "",
+      "Tell me your area and whether you want social, music, food, wellness, or something quiet, and I'll narrow it down.",
     ].join("\n");
   }
 

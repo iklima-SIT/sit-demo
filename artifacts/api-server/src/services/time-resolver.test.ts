@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildEventSearchQuery, createLiveEventSearchInput, parsePhanganEventsCalendar, searchLiveEvents, validateEventAnswerWindow } from "./event-service";
+import { buildEventFallbackMessage, buildEventSearchQuery, createLiveEventSearchInput, parsePhanganEventsCalendar, searchLiveEvents, validateEventAnswerWindow } from "./event-service";
 import { resolveEventTimeWindow, resolveTimeExpression } from "./time-resolver";
 
 const FIXED_NOW = new Date("2026-07-07T05:00:00.000Z"); // Tuesday, July 7 2026 at 12:00 in Koh Phangan.
+
+test("tonight fallback offers concrete plans without inventing live events", () => {
+  const message = buildEventFallbackMessage(resolveEventTimeWindow("tonight", FIXED_NOW));
+
+  assert.match(message, /won't present one as confirmed/i);
+  assert.match(message, /three solid plans/i);
+  assert.match(message, /Alcove or Cintamani/i);
+});
 
 function assertWindow(text: string, expected: { label: string; startTime: string; endTime: string; granularity?: string }, now = FIXED_NOW): void {
   const window = resolveEventTimeWindow(text, now);
