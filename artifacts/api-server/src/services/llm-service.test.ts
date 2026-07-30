@@ -47,3 +47,28 @@ test("enabled LLM rewrites the first text message and preserves state", async ()
   assert.equal(requestBody?.model, "gpt-5.6-sol");
   assert.deepEqual(requestBody?.reasoning, { effort: "low" });
 });
+
+test("LLM cannot replace concrete listed options with a generic follow-up", async () => {
+  const output = startConversation();
+  output.messages = [{
+    type: "text",
+    text: [
+      "You still have three solid plans:",
+      "• Relaxed sunset: Alcove or Cintamani in Hinkong.",
+      "• Flexible evening: dinner in Thong Sala and live music nearby.",
+      "• Quiet option: a sunset picnic on Hinkong beach.",
+    ].join("\n"),
+  }];
+
+  await assert.rejects(
+    enhanceConversationWithLlm({
+      userMessage: "What can I do tonight in Koh Phangan?",
+      output,
+      env: { SIT_LLM_ENABLED: "true", OPENAI_API_KEY: "test-key" },
+      fetchImpl: async () => new Response(JSON.stringify({
+        output_text: "I don't have reliable listings. Are you looking for nightlife or wellness?",
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    }),
+    /omitted concrete options/,
+  );
+});
