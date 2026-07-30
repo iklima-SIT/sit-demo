@@ -117,7 +117,7 @@ export function resolveEventFilteringCutoff(window: TimeWindow, now: Date): stri
 
 export function hasExplicitEventTimeExpression(text: string): boolean {
   const normalized = text.toLowerCase().replace(/[’']/g, "");
-  return /\b(todays?|tonight|later tonight|tomorrows?|this (?:morning|afternoon|evening|weekend)|next weekend|right now|now)\b/.test(normalized)
+  return /\b(todays?|tonight|later tonight|tomorrows?|stasera|oggi|domani|this (?:morning|afternoon|evening|weekend)|next weekend|right now|now)\b/.test(normalized)
     || /\b(?:this|next)?\s*(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(normalized)
     || /\b20\d{2}-\d{1,2}-\d{1,2}\b/.test(normalized)
     || /\b\d{1,2}[/.]\d{1,2}(?:[/.]20\d{2})?\b/.test(normalized)
@@ -345,6 +345,7 @@ export function resolveTimeExpression(input: TimeResolverInput): TimeWindow {
   if (/\btomorrow\s+night\b/.test(normalized)) return nightWindow("Tomorrow Night", tomorrow, "tomorrow night");
   if (/\btomorrows?\b/.test(normalized)) return fullDay("Tomorrow", tomorrow, "tomorrow");
   if (/\blater\s+tonight\b/.test(normalized)) return laterTonightWindow(today, "later tonight");
+  if (/\bstasera\b/.test(normalized)) return nightWindow("Tonight", today, "stasera");
   if (/\btonight\b/.test(normalized)) return nightWindow("Tonight", today, "tonight");
   if (/\bthis\s+morning\b/.test(normalized)) return partialDay("This Morning", today, "this morning", [6, 0, 0], [12, 0, 0]);
   if (/\bthis\s+afternoon\b/.test(normalized)) return partialDay("This Afternoon", today, "this afternoon", [12, 0, 0], [17, 0, 0]);
@@ -376,7 +377,7 @@ export function resolveEventTimeWindow(query: string, now: Date = new Date()): N
 
 export function stripNaturalLanguageDate(query: string): string {
   return query
-    .replace(/\b(later\s+tonight|tonight|todays?|tomorrow\s+night|tomorrows?|this\s+weekend|next\s+weekend|weekend)\b/gi, "")
+    .replace(/\b(later\s+tonight|tonight|todays?|tomorrow\s+night|tomorrows?|stasera|oggi|domani|this\s+weekend|next\s+weekend|weekend)\b/gi, "")
     .replace(/\b(this|next)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi, "")
     .replace(/\b20\d{2}-\d{1,2}-\d{1,2}\b/g, "")
     .replace(/\b\d{1,2}[/.]\d{1,2}(?:[/.]20\d{2})?\b/g, "")

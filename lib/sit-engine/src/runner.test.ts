@@ -73,6 +73,13 @@ test("adapter parity: live party question", async () => {
   assert.match(output.messages[0]!.text, /EVENT:/);
 });
 
+test("Italian tonight request returns proposals without onboarding", async () => {
+  const output = await assertParity("Cosa fare a Koh Phangan stasera?");
+  assert.equal(output.decision?.intent, "live_event_search");
+  assert.equal(output.trace?.onboardingTriggered, false);
+  assert.match(output.messages[0]!.text, /EVENT:/);
+});
+
 test("adapter parity: Lighthouse location", async () => {
   const output = await assertParity("Send me the Lighthouse location.");
   assert.equal(output.decision?.intent, "location_request");
