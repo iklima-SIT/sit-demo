@@ -3,6 +3,7 @@ import { runConversationTurn, type ConversationChannel } from "@workspace/sit-en
 import { createApiConversationServices } from "../services/conversation-services";
 import { sessionRepository } from "../repositories/session-repository";
 import { buildDeveloperConsolePayload, createDeveloperConsoleRecorder } from "../services/developer-console";
+import { enhanceConversationWithLlm } from "../services/llm-service";
 
 const router: IRouter = Router();
 
@@ -38,13 +39,20 @@ router.post("/conversation/turn", async (req: Request, res: Response): Promise<v
   const recorder = devTrace ? createDeveloperConsoleRecorder(baseServices) : undefined;
   const stateBefore = structuredClone(session.state);
 
-  const output = await runConversationTurn({
+  const deterministicOutput = await runConversationTurn({
     message,
     state: session.state,
     channel,
     services: recorder?.services ?? baseServices,
     devTrace,
     clientContext: { browserTimezone },
+  });
+  const output = await enhanceConversationWithLlm({
+    userMessage: message,
+    output: deterministicOutput,
+  }).catch(error => {
+    req.log.warn({ err: error }, "LLM enhancement failed; using deterministic SIT response");
+    return deterministicOutput;
   });
 
   const updatedSession = await sessionRepository.update(session.id, output.updatedState);
