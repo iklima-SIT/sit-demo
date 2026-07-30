@@ -32,9 +32,9 @@ export function isDestinationContextFollowUp(text: string, memory: ConversationM
 export function isEventQuery(text: string): boolean {
   if (isDefinitionQuestion(text)) return false;
   const t = normalizeIntentText(text);
-  const temporal = /\b(tonight|todays?|tomorrows?|this (week|weekend|evening)|right now|happening now|whats on|what is on|whats going on|whats happening|gece|gecesi|aksam|akşam|bugun|bugün|yarin|yarın)\b/.test(t) ||
+  const temporal = /\b(tonight|todays?|tomorrows?|this (week|weekend|evening)|right now|happening now|whats on|what is on|whats going on|whats happening|stasera|oggi|domani|gece|gecesi|aksam|akşam|bugun|bugün|yarin|yarın)\b/.test(t) ||
     /\b\d{1,2}\s*(i|ı|si|sı|inci|uncu|üncü|nci)?\b.*\b(night|gece|gecesi|aksam|akşam)\b/.test(t);
-  const eventIntent = /\b(event|events|party|parties|on|for|going on|happening|schedule|agenda|live|music|show|parti|muzik|müzik|etkinlik|konser|dj)\b/.test(t);
+  const eventIntent = /\b(event|events|party|parties|on|for|going on|happening|schedule|agenda|live|music|show|fare|facciamo|evento|eventi|serata|serate|musica|spettacolo|parti|muzik|müzik|etkinlik|konser|dj)\b/.test(t);
   return temporal && eventIntent || /\b(whats on|what is on|whats for tomorrows?|what is for tomorrows?|any (events|parties|shows) (tonight|today|tomorrows?))\b/.test(t);
 }
 
