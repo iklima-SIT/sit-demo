@@ -401,20 +401,30 @@ export default function ChatScreen() {
 
     addMsg({ type: "text", sender: "user", text: trimmed });
 
-    const output = await sendConversationTurn({
-      sessionId,
-      userKey: userKeyRef.current,
-      message: trimmed,
-      devTrace: developerMode,
-    });
-    setSessionId(output.session.id);
-    recordDeveloperTurn(output.developerConsole);
-    await renderRunnerMessages(output.messages, output.brief);
-    setSuggestions(output.suggestions ?? []);
-    setPlanOptions(output.planOptions ?? []);
-
-    setLocked(false);
-    inputRef.current?.focus();
+    try {
+      const output = await sendConversationTurn({
+        sessionId,
+        userKey: userKeyRef.current,
+        message: trimmed,
+        devTrace: developerMode,
+      });
+      setSessionId(output.session.id);
+      recordDeveloperTurn(output.developerConsole);
+      await renderRunnerMessages(output.messages, output.brief);
+      setSuggestions(output.suggestions ?? []);
+      setPlanOptions(output.planOptions ?? []);
+    } catch (error) {
+      console.error("Conversation request failed", error);
+      setIsTyping(false);
+      addMsg({
+        type: "text",
+        sender: "sit",
+        text: "I couldn't complete that request. Please try again in a moment.",
+      });
+    } finally {
+      setLocked(false);
+      inputRef.current?.focus();
+    }
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
