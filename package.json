@@ -4,11 +4,13 @@
   "license": "MIT",
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "build": "pnpm run typecheck && pnpm --filter @workspace/sit-demo build && pnpm --filter @workspace/api-server build",
+    "start": "pnpm --filter @workspace/api-server start",
     "import:sit-kb": "pnpm --filter @workspace/scripts import:sit-kb",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
+  "packageManager": "pnpm@11.9.0",
   "private": true,
   "devDependencies": {
     "prettier": "^3.8.3",

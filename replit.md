@@ -10,6 +10,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Optional LLM response layer: set `SIT_LLM_ENABLED=true` and `OPENAI_API_KEY`. The default model is `gpt-5.6-sol`; deterministic SIT responses remain the fallback.
 
 ## Stack
 
