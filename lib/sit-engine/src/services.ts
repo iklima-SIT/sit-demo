@@ -59,7 +59,7 @@ export function createStaticLocationService(): LocationService {
             : venue.transportNotes.walkNote;
         return {
           answer: isVenueRouteQuestion(query)
-            ? formatVenueRouteAnswer(venue.name, query, routeNote, venue.transportNotes.routeOptions)
+            ? formatVenueRouteAnswer(venue.name, query, routeNote, venue.transportNotes.routeOptions, memory.stayingArea)
             : formatVenueCard(venue),
           outcome: "resolved",
           venueId: venue.id,
@@ -79,7 +79,7 @@ export function createStaticLocationService(): LocationService {
       if (eventVenue) {
         return {
           answer: isVenueRouteQuestion(query)
-            ? formatVenueRouteAnswer(eventVenue.name, query)
+            ? formatVenueRouteAnswer(eventVenue.name, query, undefined, undefined, memory.stayingArea)
             : formatVenueLocationReference(eventVenue),
           outcome: "resolved",
           venueId: eventVenue.id,

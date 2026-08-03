@@ -507,6 +507,35 @@ test("a missing venue creates a blocking contract that consumes the next venue a
   assert.equal(answer.updatedState.activeTask?.contract, undefined);
 });
 
+test("a misspelled travel-time follow-up reuses Hinkong and the remembered OXA destination", async () => {
+  const state = createInitialConversationState();
+  state.context.stayingArea = "Hinkong";
+  state.memory.stayingArea = "Hinkong";
+  state.memory.lastVenue = "oxa-party";
+  state.memory.lastVenueReference = {
+    id: "oxa-party",
+    name: "OXA Party",
+    aliases: ["OXA Party", "OXA Jungle Party"],
+    area: "Baan Tai",
+    googleMapsUrl: "https://maps.app.goo.gl/oxa-party",
+  };
+
+  const output = await runConversationTurn({
+    message: "how long does it tae the ride?",
+    state,
+    channel: "web",
+    services: testServices(),
+  });
+
+  assert.equal(output.decision?.intent, "location_request");
+  assert.equal(output.decision?.requiredService, "location");
+  assert.match(output.messages[0]!.text, /Travel time to OXA Party from Hinkong/i);
+  assert.match(output.messages[0]!.text, /don't have a verified live journey time/i);
+  assert.match(output.messages[0]!.text, /google\.com\/maps\/dir/);
+  assert.match(output.messages[0]!.text, /origin=Hinkong/i);
+  assert.doesNotMatch(output.messages[0]!.text, /Which destination|Tonight's OXA Jungle Party|KNOWLEDGE:/i);
+});
+
 test("a direct event request supersedes an unresolved location contract", async () => {
   const services = testServices();
   const clarification = await runConversationTurn({
