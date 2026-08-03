@@ -35,7 +35,8 @@ export function isEventQuery(text: string): boolean {
   const temporal = /\b(tonight|todays?|tomorrows?|this (week|weekend|evening)|right now|happening now|whats on|what is on|whats going on|whats happening|stasera|oggi|domani|gece|gecesi|aksam|akşam|bugun|bugün|yarin|yarın)\b/.test(t) ||
     /\b\d{1,2}\s*(i|ı|si|sı|inci|uncu|üncü|nci)?\b.*\b(night|gece|gecesi|aksam|akşam)\b/.test(t);
   const eventIntent = /\b(event|events|party|parties|on|for|going on|happening|schedule|agenda|live|music|show|fare|facciamo|evento|eventi|serata|serate|musica|spettacolo|parti|muzik|müzik|etkinlik|konser|dj)\b/.test(t);
-  return temporal && eventIntent || /\b(whats on|what is on|whats for tomorrows?|what is for tomorrows?|any (events|parties|shows) (tonight|today|tomorrows?))\b/.test(t);
+  const activityIntent = /\b(what (?:can|should|could) (?:i|we) do|what to do|things? to do|plans? for)\b/.test(t);
+  return temporal && (eventIntent || activityIntent) || /\b(whats on|what is on|whats for tomorrows?|what is for tomorrows?|any (events|parties|shows) (tonight|today|tomorrows?))\b/.test(t);
 }
 
 export function isTomorrowEventQuery(text: string): boolean {

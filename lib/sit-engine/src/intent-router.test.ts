@@ -72,6 +72,18 @@ test("Italian tonight request immediately triggers event proposals", () => {
   assert.equal(decision.requiredService, "events");
 });
 
+test("natural tonight activity question triggers event service", () => {
+  const decision = decideAssistantAction({
+    userMessage: "What can I do tonight in Koh Phangan?",
+    context: { ...INITIAL_CTX, purpose: "wellness" },
+    memory: {},
+  });
+
+  assert.equal(decision.intent, "live_event_search");
+  assert.equal(decision.action, "call_live_events");
+  assert.equal(decision.requiredService, "events");
+});
+
 test("opening hours and reservation questions are practical information", () => {
   assert.equal(classifyIntent("What time does Ethos Cafe open?"), "practical_information");
   assert.equal(classifyIntent("Do I need a reservation at Ethos Cafe?"), "practical_information");
