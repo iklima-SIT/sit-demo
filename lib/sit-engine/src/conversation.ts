@@ -234,6 +234,10 @@ function applyExplicitContextSignals(userMessage: string, ctx: UserContext, allo
   if (allowPendingAnswers && !c.scooter) c.scooter = detectScooter(t);
   if (allowPendingAnswers && !c.sociability) c.sociability = detectSociability(t);
   if (allowPendingAnswers && !c.groupComposition) c.groupComposition = detectGroupComposition(t);
+  const routeOriginText = userMessage.match(/\bfrom\s+(.+?)\s+to\s+/i)?.[1];
+  const statedStay = /\b(?:i(?:'m| am)\s+)?(?:staying|based|living)\s+in\b/i.test(userMessage);
+  const explicitArea = extractKohPhanganArea(routeOriginText ?? (statedStay ? userMessage : ""));
+  if (explicitArea) c.stayingArea = explicitArea;
   return c;
 }
 
@@ -810,6 +814,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     context: explicitContext,
     memory: {
       ...workingState.memory,
+      stayingArea: explicitContext.stayingArea ?? workingState.memory.stayingArea,
       userProfile: {
         ...workingState.memory.userProfile,
         firstName: explicitContext.firstName,
@@ -1067,7 +1072,6 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       },
     };
     workingState = appendAssistantMessages(workingState, messages, decision);
-    workingState = applyAssistantTextMemory(workingState, messages);
     return {
       messages,
       updatedState: workingState,

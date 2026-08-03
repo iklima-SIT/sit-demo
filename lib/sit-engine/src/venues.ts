@@ -261,6 +261,11 @@ export function extractLocationSubject(text: string, allowBare = false): string 
   return cleanLocationSubject(trimmed);
 }
 
+export function extractRouteDestination(text: string): string | undefined {
+  const match = text.trim().match(/\bfrom\s+.+?\s+to\s+(.+?)(?:[?.!,]+|$)/i);
+  return match?.[1] ? cleanLocationSubject(match[1]) : undefined;
+}
+
 function editDistance(left: string, right: string): number {
   const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
@@ -322,7 +327,7 @@ export function buildVenueGoogleMapsDirectionsUrl(name: string, origin = "Thong 
 }
 
 export function isVenueRouteQuestion(text: string): boolean {
-  return /\b(road|route|way there|flat|steep|hilly|hill|easy|difficult|hard to reach|road condition|ride|drive)\b/i.test(text);
+  return /\b(road|route|way there|flat|steep|hilly|hill|easy|difficult|hard to reach|road condition|ride|drive|taxi|songthaew)\b/i.test(text);
 }
 
 export function isVenueTravelTimeQuestion(text: string): boolean {
@@ -333,6 +338,8 @@ function routeOrigin(text: string, fallbackOrigin?: string): string {
   if (/\b(?:thong\s*sala|tongsala)\b/i.test(text)) return "Thong Sala";
   if (/\b(?:sri\s*thanu|srithanu)\b/i.test(text)) return "Sri Thanu";
   if (/\bhaad\s*rin\b/i.test(text)) return "Haad Rin";
+  const explicitOrigin = text.match(/\bfrom\s+(.+?)\s+to\s+/i)?.[1]?.trim();
+  if (explicitOrigin) return explicitOrigin;
   return fallbackOrigin?.trim() || "Thong Sala";
 }
 

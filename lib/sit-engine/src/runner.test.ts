@@ -536,6 +536,33 @@ test("a misspelled travel-time follow-up reuses Hinkong and the remembered OXA d
   assert.doesNotMatch(output.messages[0]!.text, /Which destination|Tonight's OXA Jungle Party|KNOWLEDGE:/i);
 });
 
+test("a taxi route keeps Hinkong as origin and OXA Party as destination for a travel-time follow-up", async () => {
+  const services = testServices();
+  const state = createInitialConversationState();
+
+  const taxi = await runConversationTurn({
+    message: "Where can I find a taxi from Hinkong to OXA Party?",
+    state,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(taxi.updatedState.memory.stayingArea, "Hinkong");
+  assert.equal(taxi.updatedState.memory.lastVenueReference?.name, "OXA Party");
+  assert.match(taxi.messages[0]!.text, /Road to OXA Party from Hinkong/i);
+
+  const duration = await runConversationTurn({
+    message: "How long does it tae the ride?",
+    state: taxi.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.match(duration.messages[0]!.text, /Travel time to OXA Party from Hinkong/i);
+  assert.match(duration.messages[0]!.text, /origin=Hinkong/i);
+  assert.match(duration.messages[0]!.text, /destination=OXA%20Party/i);
+});
+
 test("a direct event request supersedes an unresolved location contract", async () => {
   const services = testServices();
   const clarification = await runConversationTurn({

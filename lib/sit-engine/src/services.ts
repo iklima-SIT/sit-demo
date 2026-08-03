@@ -16,6 +16,7 @@ import {
   buildLocationAnswer,
   buildVenueGoogleMapsSearchUrl,
   extractLocationSubject,
+  extractRouteDestination,
   extractVenueFromText,
   findVenueLocationReference,
   formatVenueLocationReference,
@@ -47,8 +48,10 @@ export function createKnowledgeService(kb: KBCard[]): KnowledgeService {
 export function createStaticLocationService(): LocationService {
   return {
     async resolve(query, memory) {
-      const explicitVenueId = extractVenueFromText(query);
-      const explicitSubject = extractLocationSubject(query, true);
+      const routeDestination = isVenueRouteQuestion(query) ? extractRouteDestination(query) : undefined;
+      const explicitVenueId = extractVenueFromText(routeDestination ?? query);
+      const explicitSubject = routeDestination
+        ?? extractLocationSubject(query, true);
       const venueId = explicitVenueId ?? (explicitSubject ? undefined : memory.lastVenue);
       const venue = venueId ? getVenueByReference(venueId) : undefined;
       if (venue) {
@@ -94,7 +97,9 @@ export function createStaticLocationService(): LocationService {
         const dynamicId = subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         const googleMapsUrl = buildVenueGoogleMapsSearchUrl(subject);
         return {
-          answer: formatVenueSearchLocation(subject),
+          answer: isVenueRouteQuestion(query)
+            ? formatVenueRouteAnswer(subject, query, undefined, undefined, memory.stayingArea)
+            : formatVenueSearchLocation(subject),
           outcome: "resolved",
           venueId: dynamicId || undefined,
           venueName: subject,
