@@ -50,6 +50,9 @@ export function isDirectQuestion(text: string): boolean {
 
 export function isLocationRequest(text: string): boolean {
   const t = text.toLowerCase();
+  if (/\bhow long\b.{0,40}\b(?:ride|trip|journey|travel)\b|\bhow long does it (?:take|tae)\b|\b(?:travel|journey|ride) time\b/.test(t)) {
+    return true;
+  }
   if (/\b(?:road|route|ride|drive)\b.{0,80}\b(?:to|from)\b|\b(?:flat|steep|hilly|road condition)\b.{0,40}\broad\b/.test(t)) {
     return true;
   }

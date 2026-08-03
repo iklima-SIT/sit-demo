@@ -325,11 +325,15 @@ export function isVenueRouteQuestion(text: string): boolean {
   return /\b(road|route|way there|flat|steep|hilly|hill|easy|difficult|hard to reach|road condition|ride|drive)\b/i.test(text);
 }
 
-function routeOrigin(text: string): string {
+export function isVenueTravelTimeQuestion(text: string): boolean {
+  return /\bhow long\b.{0,40}\b(?:ride|trip|journey|travel)\b|\bhow long does it (?:take|tae)\b|\b(?:travel|journey|ride) time\b/i.test(text);
+}
+
+function routeOrigin(text: string, fallbackOrigin?: string): string {
   if (/\b(?:thong\s*sala|tongsala)\b/i.test(text)) return "Thong Sala";
   if (/\b(?:sri\s*thanu|srithanu)\b/i.test(text)) return "Sri Thanu";
   if (/\bhaad\s*rin\b/i.test(text)) return "Haad Rin";
-  return "Thong Sala";
+  return fallbackOrigin?.trim() || "Thong Sala";
 }
 
 export function formatVenueRouteAnswer(
@@ -337,8 +341,26 @@ export function formatVenueRouteAnswer(
   question: string,
   verifiedNote?: string,
   routeOptions?: VenueData["transportNotes"]["routeOptions"],
+  fallbackOrigin?: string,
 ): string {
-  const origin = routeOrigin(question);
+  const origin = routeOrigin(question, fallbackOrigin);
+  if (isVenueTravelTimeQuestion(question)) {
+    const durationEvidence = verifiedNote && /\b(?:min(?:ute)?s?|hours?)\b/i.test(verifiedNote)
+      ? verifiedNote
+      : undefined;
+    return [
+      `Travel time to ${name} from ${origin}:`,
+      "",
+      durationEvidence
+        ? `Known route estimate: ${durationEvidence}`
+        : "I don't have a verified live journey time for this route, so I can't give you a reliable number.",
+      "",
+      "Check the current driving time on Google Maps:",
+      buildVenueGoogleMapsDirectionsUrl(name, origin),
+      "",
+      "Allow extra time on party nights and after rain.",
+    ].join("\n");
+  }
   const matchingRouteOptions = routeOptions?.filter(option => option.origin === origin) ?? [];
   const hasSteepWarning = Boolean(verifiedNote && /\bsteep|scooter access only|not walkable\b/i.test(verifiedNote));
   const assessment = matchingRouteOptions.length > 0
