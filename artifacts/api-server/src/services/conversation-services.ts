@@ -3,7 +3,7 @@ import {
   type ConversationServices,
 } from "@workspace/sit-engine";
 import { searchLiveEvents } from "./event-service";
-import { createGooglePlacesRecommendationService } from "./google-places-service";
+import { createGeoapifyRecommendationService } from "./geoapify-service";
 import { knowledgeRepository, type KnowledgeRepository } from "../repositories/knowledge-repository";
 
 function buildKnowledgeAnswer(hits: Awaited<ReturnType<KnowledgeRepository["search"]>>): string | null {
@@ -16,7 +16,7 @@ function buildKnowledgeAnswer(hits: Awaited<ReturnType<KnowledgeRepository["sear
 
 export function createApiConversationServices(repository: KnowledgeRepository = knowledgeRepository): ConversationServices {
   return createConversationServices({
-    recommendations: createGooglePlacesRecommendationService(),
+    recommendations: createGeoapifyRecommendationService(),
     events: {
       async search(request) {
         const apiKey = process.env.EXA_API_KEY;
