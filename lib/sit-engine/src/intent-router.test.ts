@@ -191,3 +191,15 @@ test("a generic scooter-rental request selects nearby recommendations instead of
   assert.equal(decision.action, "recommend_places");
   assert.equal(decision.requiredService, "recommendations");
 });
+
+test("a misspelled healthy-food search selects real-place recommendations", () => {
+  const decision = decideAssistantAction({
+    userMessage: "where can I find healty food like asai bowl?",
+    context: INITIAL_CTX,
+    memory: { stayingArea: "Hinkong" },
+  });
+
+  assert.equal(decision.intent, "place_recommendation");
+  assert.equal(decision.action, "recommend_places");
+  assert.equal(decision.requiredService, "recommendations");
+});

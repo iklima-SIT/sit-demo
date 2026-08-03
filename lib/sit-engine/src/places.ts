@@ -28,6 +28,10 @@ export function extractKohPhanganArea(text: string): string | undefined {
 }
 
 export function isPlaceRecommendationRequest(text: string): boolean {
+  const normalizedFood = text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const discoveryRequest = /\b(?:where can i find|where should i (?:eat|shop)|find me|recommend|suggest|looking for|i want)\b/.test(normalizedFood);
+  const localPlace = /\b(?:food|restaurant|cafe|coffee|acai|asai|smoothie|bowl|healt?hy|vegan|vegetarian|pharmacy|cowork|grocery|groceries|supermarket|scooter|motorbike|rental)\b/.test(normalizedFood);
+  if (discoveryRequest && localPlace) return true;
   const normalized = text.toLowerCase().replace(/[’']/g, "'");
   return /\bwhere can i (?:rent|hire|buy|get)\b/.test(normalized)
     || /\bwhere should i (?:rent|hire|eat|work|shop)\b/.test(normalized)
@@ -36,6 +40,8 @@ export function isPlaceRecommendationRequest(text: string): boolean {
 }
 
 export function inferPlaceCategory(text: string): PlaceCategory {
+  const normalizedFood = text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(?:food|acai|asai|smoothie|bowl|healt?hy|vegan|vegetarian)\b/.test(normalizedFood)) return "restaurant";
   const normalized = text.toLowerCase();
   if (/\b(?:scooter|motorbike|bike)\b.{0,30}\b(?:rent|rental|hire)\b|\b(?:rent|rental|hire)\b.{0,30}\b(?:scooter|motorbike|bike)\b/.test(normalized)) return "scooter_rental";
   if (/\b(?:restaurant|where to eat|food)\b/.test(normalized)) return "restaurant";
@@ -47,9 +53,15 @@ export function inferPlaceCategory(text: string): PlaceCategory {
 }
 
 function categorySearch(category: PlaceCategory, originalQuery: string): string {
+  const normalized = originalQuery.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const restaurantSearch = /\b(?:acai|asai)\b/.test(normalized)
+    ? "healthy food acai bowl"
+    : /\b(?:healt?hy|vegan|vegetarian|smoothie|bowl)\b/.test(normalized)
+      ? originalQuery.replace(/[?!.]+$/g, "").trim()
+      : "restaurant";
   const searches: Record<PlaceCategory, string> = {
     scooter_rental: "scooter rental",
-    restaurant: "restaurant",
+    restaurant: restaurantSearch,
     cafe: "cafe",
     pharmacy: "pharmacy",
     coworking: "coworking space",
