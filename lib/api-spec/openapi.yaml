@@ -166,7 +166,7 @@ components:
           type: string
         channel:
           type: string
-          enum: [web, whatsapp, test]
+          enum: [web, whatsapp, telegram, test]
       required: [channel]
     ConversationTurnRequest:
       type: object
@@ -177,7 +177,7 @@ components:
           type: string
         channel:
           type: string
-          enum: [web, whatsapp, test]
+          enum: [web, whatsapp, telegram, test]
         message:
           type: string
         devTrace:
