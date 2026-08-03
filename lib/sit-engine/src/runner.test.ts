@@ -80,6 +80,17 @@ test("Italian tonight request returns proposals without onboarding", async () =>
   assert.match(output.messages[0]!.text, /EVENT:/);
 });
 
+test("natural tonight request bypasses wellness knowledge and returns event proposals", async () => {
+  const state = createInitialConversationState();
+  state.context.purpose = "wellness";
+  const output = await assertParity("What can I do tonight in Koh Phangan?", state);
+
+  assert.equal(output.decision?.intent, "live_event_search");
+  assert.equal(output.decision?.requiredService, "events");
+  assert.match(output.messages[0]!.text, /EVENT:/);
+  assert.doesNotMatch(output.messages[0]!.text, /KNOWLEDGE:/);
+});
+
 test("adapter parity: Lighthouse location", async () => {
   const output = await assertParity("Send me the Lighthouse location.");
   assert.equal(output.decision?.intent, "location_request");
