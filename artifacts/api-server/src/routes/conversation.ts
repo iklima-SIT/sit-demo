@@ -8,7 +8,7 @@ import { enhanceConversationWithLlm } from "../services/llm-service";
 const router: IRouter = Router();
 
 function asChannel(value: unknown): ConversationChannel {
-  return value === "whatsapp" || value === "test" ? value : "web";
+  return value === "whatsapp" || value === "telegram" || value === "test" ? value : "web";
 }
 
 router.post("/conversation/session", async (req: Request, res: Response): Promise<void> => {

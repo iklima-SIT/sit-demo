@@ -39,7 +39,7 @@ export type AnswerMode =
 
 export type RequiredService = "events" | "destination_context" | "recommendations" | "location" | "knowledge" | "plans" | "none";
 
-export type ConversationChannel = "web" | "whatsapp" | "test";
+export type ConversationChannel = "web" | "whatsapp" | "telegram" | "test";
 
 export interface AssistantMessage {
   type: "text";

@@ -5,6 +5,7 @@ import eventsRouter from "./events";
 import testExaRouter from "./test-exa";
 import conversationRouter from "./conversation";
 import knowledgeRouter from "./knowledge";
+import telegramRouter from "./telegram";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,8 @@ router.use(conversationRouter);
 
 // Server-side SIT knowledge endpoints
 router.use(knowledgeRouter);
+
+// Telegram Bot API webhook — POST /api/integrations/telegram/webhook
+router.use(telegramRouter);
 
 export default router;
