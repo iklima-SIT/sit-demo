@@ -43,6 +43,40 @@ function groundedContext(output: RunConversationTurnOutput): string {
   });
 }
 
+const OPTION_STOP_WORDS = new Set([
+  "about", "after", "around", "before", "could", "every", "their", "there",
+  "these", "thing", "those", "tonight", "where", "which", "while", "would",
+]);
+
+function listedOptions(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => /^(?:[-*•]|\d+[.)])\s+/.test(line));
+}
+
+function optionTerms(option: string): string[] {
+  return [...new Set(
+    option
+      .toLocaleLowerCase("en")
+      .match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)
+      ?.filter(term => term.length >= 5 && !OPTION_STOP_WORDS.has(term)) ?? [],
+  )];
+}
+
+function preservesListedOptions(draft: string, rewritten: string): boolean {
+  const options = listedOptions(draft);
+  if (options.length < 2) return true;
+
+  const normalizedReply = rewritten.toLocaleLowerCase("en");
+  return options.every(option => {
+    const terms = optionTerms(option);
+    if (terms.length === 0) return true;
+    const requiredMatches = Math.min(2, terms.length);
+    return terms.filter(term => normalizedReply.includes(term)).length >= requiredMatches;
+  });
+}
+
 function replaceLatestAssistantTranscript(
   output: RunConversationTurnOutput,
   rewritten: string,
@@ -105,8 +139,10 @@ export async function enhanceConversationWithLlm(input: {
                 "Rewrite the supplied deterministic draft as a natural, concise chat reply.",
                 "Treat the draft and structured context as the only factual evidence.",
                 "Never invent events, dates, opening hours, prices, addresses, availability, or links.",
-                "Preserve every material caveat and source link from the draft.",
-                "If the evidence is insufficient, say so and ask one focused follow-up question.",
+                "Preserve every concrete recommendation, named place, option, distinction, caveat, and source link from the draft.",
+                "When the draft contains a list or multiple options, include every option; never summarize, remove, merge, or replace them with a question.",
+                "Only when the draft contains no actionable option may you say evidence is insufficient and ask one focused follow-up question.",
+                "Never restart onboarding or ask for information the user has already supplied.",
                 "Return only the final user-facing reply, with no analysis or JSON.",
               ].join("\n"),
             },
@@ -132,6 +168,9 @@ export async function enhanceConversationWithLlm(input: {
 
   const rewritten = extractOutputText(await response.json() as OpenAIResponse);
   if (!rewritten) throw new Error("OpenAI Responses API returned no text");
+  if (!preservesListedOptions(draft, rewritten)) {
+    throw new Error("OpenAI response omitted concrete options from the grounded draft");
+  }
 
   let replaced = false;
   return {
