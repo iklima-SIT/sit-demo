@@ -34,9 +34,37 @@ export function isEventQuery(text: string): boolean {
   const t = normalizeIntentText(text);
   const temporal = /\b(tonight|todays?|tomorrows?|this (week|weekend|evening)|right now|happening now|whats on|what is on|whats going on|whats happening|stasera|oggi|domani|gece|gecesi|aksam|akşam|bugun|bugün|yarin|yarın)\b/.test(t) ||
     /\b\d{1,2}\s*(i|ı|si|sı|inci|uncu|üncü|nci)?\b.*\b(night|gece|gecesi|aksam|akşam)\b/.test(t);
-  const eventIntent = /\b(event|events|party|parties|on|for|going on|happening|schedule|agenda|live|music|show|fare|facciamo|evento|eventi|serata|serate|musica|spettacolo|parti|muzik|müzik|etkinlik|konser|dj)\b/.test(t);
+  const eventIntent = /\b(event|events|party|parties|on|for|going on|happening|schedule|agenda|live|music|show|yoga|wellness|breathwork|meditation|workshops?|classes?|ecstatic dance|fare|facciamo|evento|eventi|serata|serate|musica|spettacolo|parti|muzik|müzik|etkinlik|konser|dj)\b/.test(t);
   const activityIntent = /\b(what (?:can|should|could) (?:i|we) do|what to do|things? to do|plans? for)\b/.test(t);
   return temporal && (eventIntent || activityIntent) || /\b(whats on|what is on|whats for tomorrows?|what is for tomorrows?|any (events|parties|shows) (tonight|today|tomorrows?))\b/.test(t);
+}
+
+export function isStandaloneBroadEventRequest(text: string): boolean {
+  if (resolveEventSearchFilters(text)) return false;
+  const t = normalizeIntentText(text).trim();
+  if (!isDateFollowUp(t)) return false;
+  return /\bwhat (?:can |should )?i do\b/.test(t)
+    || /\bwhat to do\b/.test(t)
+    || /\bwhats happening\b|\bwhat is happening\b|\bwhats going on\b|\bwhat is going on\b/.test(t)
+    || /\bwhats on\b|\bwhat is on\b/.test(t)
+    || /\b(?:show me|list)\b.{0,30}\bevents?\b/.test(t)
+    || /^(?:events?|activities)\b/.test(t);
+}
+
+export function isEventCorrectionRequest(text: string, memory: ConversationMemory): boolean {
+  if (memory.lastTopic !== "events" || !isDateFollowUp(text)) return false;
+  const t = normalizeIntentText(text).trim();
+  return /\b(?:i\s+)?(?:asked for|said|meant|wanted)\b/.test(t)
+    || /\bnot\s+(?:today|tonight|tomorrow)\b/.test(t)
+    || /^(?:no|actually|sorry)[,\s]+/.test(t);
+}
+
+export function isTerseEventDateFollowUp(text: string): boolean {
+  const t = normalizeIntentText(text)
+    .replace(/[?.!,]+$/g, "")
+    .trim();
+  const temporal = "(?:today|tonight|tomorrow(?: night| morning| afternoon| evening)?|this weekend|next weekend|(?:(?:this|next) )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun))";
+  return new RegExp(`^(?:(?:and|no|actually)\\s+|what about\\s+)?${temporal}(?:\\s+instead)?$`, "i").test(t);
 }
 
 export function isTomorrowEventQuery(text: string): boolean {
@@ -105,7 +133,8 @@ function isEventPreferenceRefinement(text: string, memory: ConversationMemory): 
 
 export function isEventContextFollowUp(text: string, memory: ConversationMemory): boolean {
   if (memory.lastTopic !== "events") return false;
-  return isDateFollowUp(text)
+  return isTerseEventDateFollowUp(text)
+    || isEventCorrectionRequest(text, memory)
     || isEventNarrowingRequest(text)
     || isEventBroadeningRequest(text)
     || isEventPreferenceRefinement(text, memory);
@@ -121,6 +150,8 @@ export function classifyIntent(text: string, memory: ConversationMemory = {}): I
   if (isDestinationContextRequest(text)) return "destination_context";
   if (isDestinationContextFollowUp(text, memory)) return "follow_up";
   if (isDefinitionQuestion(text)) return "definition";
+  if (isEventCorrectionRequest(text, memory)) return "follow_up";
+  if (isStandaloneBroadEventRequest(text)) return "live_event_search";
   if (isEventQuery(text)) return "live_event_search";
   if (isPlaceRecommendationRequest(text)) return "place_recommendation";
   if (isLocationRequest(text)) return "location_request";

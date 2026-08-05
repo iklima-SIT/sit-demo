@@ -6,6 +6,7 @@ import type { ConversationState } from "@workspace/sit-engine";
 import {
   type AssistantMessage,
   type DeveloperConsolePayload,
+  type ShadowAgentTrace,
   type SITBrief,
   createOrLoadWebSession,
   getKnowledgeVersion,
@@ -114,6 +115,11 @@ function DeveloperConsole({
   const selected = turns.find(turn => turn.id === selectedId) ?? turns.at(-1);
   if (!selected) return null;
   const payload = selected.payload;
+  const shadowAgent: ShadowAgentTrace = payload.shadowAgent ?? {
+    status: "disabled",
+    disabledReason: "shadow_flag_off",
+    durationMs: 0,
+  };
 
   return (
     <section className="flex-none max-h-[42dvh] overflow-y-auto border-t border-amber-400/20 bg-black/45 px-3 py-3 text-white">
@@ -211,6 +217,20 @@ function DeveloperConsole({
         <details className="rounded-md border border-white/[0.08] p-2">
           <summary className="cursor-pointer text-white/55">LLM Response</summary>
           <JsonBlock value={payload.llmResponse} />
+        </details>
+
+        <details open className="rounded-md border border-amber-300/20 bg-amber-300/[0.03] p-2">
+          <summary className="cursor-pointer text-amber-100/70">Shadow Agent</summary>
+          <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-white/40">
+            <span>{shadowAgent.status}</span>
+            <span>{shadowAgent.model ?? shadowAgent.disabledReason ?? "not configured"} · {shadowAgent.durationMs}ms</span>
+          </div>
+          {shadowAgent.error ? (
+            <div className="mt-2 text-[10px] text-red-300/80">{shadowAgent.error}</div>
+          ) : null}
+          <div className="mt-2">
+            <JsonBlock value={shadowAgent.plan ?? shadowAgent} />
+          </div>
         </details>
 
         <details className="rounded-md border border-white/[0.08] p-2">

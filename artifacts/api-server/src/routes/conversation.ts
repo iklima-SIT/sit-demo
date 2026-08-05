@@ -3,7 +3,8 @@ import { runConversationTurn, type ConversationChannel } from "@workspace/sit-en
 import { createApiConversationServices } from "../services/conversation-services";
 import { sessionRepository } from "../repositories/session-repository";
 import { buildDeveloperConsolePayload, createDeveloperConsoleRecorder } from "../services/developer-console";
-import { enhanceConversationWithLlm } from "../services/llm-service";
+import { enhanceConversationWithLlm, type LlmTrace } from "../services/llm-service";
+import { runShadowAgentTurn } from "../services/shadow-agent";
 
 const router: IRouter = Router();
 
@@ -34,7 +35,10 @@ router.post("/conversation/turn", async (req: Request, res: Response): Promise<v
     return;
   }
 
-  const devTrace = process.env.NODE_ENV === "development" || Boolean(req.body.devTrace);
+  const developerModeAllowed = process.env.NODE_ENV === "development"
+    || process.env.SIT_DEVELOPER_MODE_ENABLED === "true";
+  const devTrace = developerModeAllowed
+    && (process.env.NODE_ENV === "development" || Boolean(req.body.devTrace));
   const baseServices = createApiConversationServices();
   const recorder = devTrace ? createDeveloperConsoleRecorder(baseServices) : undefined;
   const stateBefore = structuredClone(session.state);
@@ -47,12 +51,23 @@ router.post("/conversation/turn", async (req: Request, res: Response): Promise<v
     devTrace,
     clientContext: { browserTimezone },
   });
+  let llmTrace: LlmTrace | undefined;
   const output = await enhanceConversationWithLlm({
     userMessage: message,
     output: deterministicOutput,
+    onTrace: trace => {
+      llmTrace = trace;
+    },
   }).catch(error => {
     req.log.warn({ err: error }, "LLM enhancement failed; using deterministic SIT response");
     return deterministicOutput;
+  });
+  const shadowAgent = await runShadowAgentTurn({
+    userMessage: message,
+    channel,
+    stateBefore,
+    canonicalOutput: output,
+    devTrace,
   });
 
   const updatedSession = await sessionRepository.update(session.id, output.updatedState);
@@ -65,6 +80,8 @@ router.post("/conversation/turn", async (req: Request, res: Response): Promise<v
           stateBefore,
           output,
           services: recorder.getCalls(),
+          llm: llmTrace,
+          shadowAgent,
         })
       : undefined,
   });

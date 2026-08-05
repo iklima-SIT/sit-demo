@@ -6,6 +6,8 @@ import type {
   KnowledgeReference,
   RunConversationTurnOutput,
 } from "@workspace/sit-engine";
+import type { ShadowAgentTrace } from "./shadow-agent";
+import type { LlmTrace } from "./llm-service";
 
 export type DeveloperServiceName =
   | "EventService"
@@ -108,9 +110,18 @@ export interface DeveloperConsolePayload {
     finalPrompt: string;
   };
   llmResponse: {
+    status: LlmTrace["status"] | "not_called";
+    tier?: LlmTrace["tier"];
+    model?: string;
+    routingReason?: string;
+    reasoningEffort?: string;
+    estimatedInputTokens?: number;
+    maxOutputTokens?: number;
+    durationMs?: number;
     rawModelOutput: string;
     finalFormattedOutput: string;
   };
+  shadowAgent: ShadowAgentTrace;
   decisionTrace: Array<"User" | "Intent" | "Memory" | "Services" | "Knowledge" | "LLM" | "Final Response">;
   timelineTurn: {
     stateBefore: ConversationState;
@@ -233,6 +244,8 @@ export function buildDeveloperConsolePayload(input: {
   stateBefore: ConversationState;
   output: RunConversationTurnOutput;
   services: DeveloperServiceCall[];
+  llm?: LlmTrace;
+  shadowAgent?: ShadowAgentTrace;
 }): DeveloperConsolePayload {
   const finalFormattedOutput = formatAssistantMessages(input.output.messages);
   const retrievedCards = input.output.knowledge?.references ?? [];
@@ -298,15 +311,36 @@ export function buildDeveloperConsolePayload(input: {
       importedAt: input.output.knowledge?.importedAt,
     },
     promptInspector: {
-      systemPrompt: "SIT deterministic conversation engine. No LLM system prompt was sent for this turn.",
-      retrievedContext: JSON.stringify(retrievedCards, null, 2),
+      systemPrompt: input.llm?.systemPrompt
+        ?? "SIT deterministic conversation engine. No LLM system prompt was sent for this turn.",
+      retrievedContext: input.llm?.groundedContext
+        ?? JSON.stringify(retrievedCards, null, 2),
       memoryContext: JSON.stringify(memory, null, 2),
       userMessage: input.userMessage,
-      finalPrompt: "No LLM prompt was constructed by the current Phase 2A runner.",
+      finalPrompt: input.llm?.finalPrompt
+        ?? "No LLM prompt was constructed by the current Phase 2A runner.",
     },
     llmResponse: {
-      rawModelOutput: "No raw model output: current runner is deterministic/service-based.",
+      status: input.llm?.status ?? "not_called",
+      tier: input.llm?.tier,
+      model: input.llm?.model,
+      routingReason: input.llm?.routingReason,
+      reasoningEffort: input.llm?.reasoningEffort,
+      estimatedInputTokens: input.llm?.estimatedInputTokens,
+      maxOutputTokens: input.llm?.maxOutputTokens,
+      durationMs: input.llm?.durationMs,
+      rawModelOutput: input.llm?.rawModelOutput
+        ?? (input.llm?.error
+          ? `OpenAI fallback: ${input.llm.error}`
+          : input.llm?.disabledReason
+            ? `OpenAI skipped: ${input.llm.disabledReason}`
+            : "No raw model output: current runner is deterministic/service-based."),
       finalFormattedOutput,
+    },
+    shadowAgent: input.shadowAgent ?? {
+      status: "disabled",
+      disabledReason: "shadow_flag_off",
+      durationMs: 0,
     },
     decisionTrace: ["User", "Intent", "Memory", "Services", "Knowledge", "LLM", "Final Response"],
     timelineTurn: {

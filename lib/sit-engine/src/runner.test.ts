@@ -972,6 +972,98 @@ test("pending request: tomorrow instead changes only the date", async () => {
   ]);
 });
 
+test("a standalone broad tomorrow request does not inherit tonight's party filter", async () => {
+  const captured: Array<{ label: string; categories?: string[] }> = [];
+  const services = createConversationServices({
+    events: {
+      async search(request) {
+        captured.push({ label: request.timeWindow.label, categories: request.filters?.categories });
+        return { response: "Event overview", fallback: false };
+      },
+    },
+  });
+  const first = await runConversationTurn({
+    message: "What parties are happening tonight?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const second = await runConversationTurn({
+    message: "What to do tomorrow?",
+    state: first.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.deepEqual(captured, [
+    { label: "Tonight", categories: ["party"] },
+    { label: "Tomorrow", categories: undefined },
+  ]);
+  assert.equal(second.decision?.intent, "live_event_search");
+  assert.equal(second.updatedState.memory.lastEvent?.filters, undefined);
+});
+
+test("a terse date modifier still preserves the explicit event category", async () => {
+  const captured: Array<{ label: string; categories?: string[] }> = [];
+  const services = createConversationServices({
+    events: {
+      async search(request) {
+        captured.push({ label: request.timeWindow.label, categories: request.filters?.categories });
+        return { response: "Party events", fallback: false };
+      },
+    },
+  });
+  const first = await runConversationTurn({
+    message: "What parties are happening tonight?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const second = await runConversationTurn({
+    message: "Tomorrow instead.",
+    state: first.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(second.decision?.intent, "follow_up");
+  assert.deepEqual(captured, [
+    { label: "Tonight", categories: ["party"] },
+    { label: "Tomorrow", categories: ["party"] },
+  ]);
+});
+
+test("a date correction remains a refinement instead of starting a third event task", async () => {
+  const captured: Array<{ label: string; categories?: string[] }> = [];
+  const services = createConversationServices({
+    events: {
+      async search(request) {
+        captured.push({ label: request.timeWindow.label, categories: request.filters?.categories });
+        return { response: "Tomorrow overview", fallback: false };
+      },
+    },
+  });
+  const first = await runConversationTurn({
+    message: "What to do tomorrow?",
+    state: createInitialConversationState(),
+    channel: "web",
+    services,
+  });
+  const second = await runConversationTurn({
+    message: "I asked for tomorrow.",
+    state: first.updatedState,
+    channel: "web",
+    services,
+  });
+
+  assert.equal(second.decision?.intent, "follow_up");
+  assert.equal(second.updatedState.activeTask?.id, first.updatedState.activeTask?.id);
+  assert.deepEqual(captured, [
+    { label: "Tomorrow", categories: undefined },
+    { label: "Tomorrow", categories: undefined },
+  ]);
+});
+
 test("pending request: show me everything broadens category but preserves today", async () => {
   const captured: Array<{ label: string; categories?: string[] }> = [];
   const services = createConversationServices({

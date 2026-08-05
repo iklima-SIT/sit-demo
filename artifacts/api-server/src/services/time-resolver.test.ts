@@ -770,3 +770,63 @@ test("Event validator allows late-night event after midnight inside tonight wind
   assert.match(result.answer ?? "", /After midnight set/);
   assert.equal(result.rejectedCandidates.length, 0);
 });
+
+test("Tomorrow excludes events that start tonight and merely finish after midnight", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target === "https://todo.today/koh-phangan/") {
+      return new Response(`
+        <section
+          data-channel="koh-phangan"
+          data-rest-url="https://todo.today/api/todo-today/v1/events"
+          data-rest-nonce="test-nonce"
+          id="tt-app"
+        ></section>
+      `, { status: 200 });
+    }
+    if (target.includes("/api/todo-today/v1/events")) {
+      return Response.json({
+        filters: { categories: [{ id: 1, name: "Party", short_name: "Party" }] },
+        sections: [{ events: [
+          {
+            id: 1,
+            short_name: "Tonight Carry-over Party",
+            link: "https://todo.today/koh-phangan/2026/07/07/tonight-carry-over-party",
+            start_time: "10:00 PM",
+            end_time: "2:00 AM",
+            venue: "Night Venue",
+            category_id: 1,
+          },
+          {
+            id: 2,
+            short_name: "Tomorrow Sunset Party",
+            link: "https://todo.today/koh-phangan/2026/07/08/tomorrow-sunset-party",
+            start_time: "6:00 PM",
+            end_time: "11:00 PM",
+            venue: "Sunset Venue",
+            category_id: 1,
+          },
+        ] }],
+      });
+    }
+    if (target.includes("phangantoday") || target.includes("phangan.events")) {
+      return new Response("<html>No matching events</html>", { status: 200 });
+    }
+    throw new Error(`Unexpected fetch ${target}`);
+  };
+
+  try {
+    const input = createLiveEventSearchInput("What parties are happening tomorrow?", FIXED_NOW);
+    const result = await searchLiveEvents(input);
+
+    assert.match(result.response ?? "", /Tomorrow Sunset Party/);
+    assert.doesNotMatch(result.response ?? "", /Tonight Carry-over Party/);
+    assert.match(
+      result.diagnostics?.filterDecisions?.find(decision => decision.event.includes("Tonight Carry-over Party"))?.reason ?? "",
+      /started before the normalized Tomorrow window/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

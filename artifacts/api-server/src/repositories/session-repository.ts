@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createInitialConversationState, type ConversationChannel, type ConversationState, type ConversationTurn, type ConversationMemory } from "@workspace/sit-engine";
 
 export interface ConversationSession {
@@ -22,7 +24,7 @@ export interface SessionRepository {
   expire(sessionId: string): Promise<void>;
 }
 
-const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_SESSION_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -44,7 +46,7 @@ export class InMemorySessionRepository implements SessionRepository {
   private sessions = new Map<string, ConversationSession>();
   private index = new Map<string, string>();
 
-  constructor(private readonly ttlMs = DEFAULT_TTL_MS) {}
+  constructor(private readonly ttlMs = DEFAULT_SESSION_TTL_MS) {}
 
   async create(input: { userKey: string; channel: ConversationChannel }): Promise<ConversationSession> {
     const session: ConversationSession = {
@@ -97,7 +99,6 @@ export class InMemorySessionRepository implements SessionRepository {
       },
       stateVersion: existing.stateVersion + 1,
       updatedAt: nowIso(),
-      expiresAt: expiresAt(this.ttlMs),
     };
     this.sessions.set(sessionId, updated);
     return updated;
@@ -111,7 +112,6 @@ export class InMemorySessionRepository implements SessionRepository {
       state: createInitialConversationState(),
       stateVersion: existing.stateVersion + 1,
       updatedAt: nowIso(),
-      expiresAt: expiresAt(this.ttlMs),
     };
     this.sessions.set(sessionId, reset);
     return reset;
@@ -127,5 +127,157 @@ export class InMemorySessionRepository implements SessionRepository {
   }
 }
 
-export const sessionRepository = new InMemorySessionRepository();
+interface PersistedSessionStore {
+  version: 1;
+  sessions: ConversationSession[];
+}
 
+export class FileSessionRepository implements SessionRepository {
+  private sessions = new Map<string, ConversationSession>();
+  private index = new Map<string, string>();
+  private loadPromise?: Promise<void>;
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly filePath: string,
+    private readonly ttlMs = DEFAULT_SESSION_TTL_MS,
+  ) {}
+
+  private ensureLoaded(): Promise<void> {
+    this.loadPromise ??= this.loadFromDisk();
+    return this.loadPromise;
+  }
+
+  private async loadFromDisk(): Promise<void> {
+    try {
+      const raw = await fs.readFile(this.filePath, "utf8");
+      const store = JSON.parse(raw) as PersistedSessionStore;
+      if (store.version !== 1 || !Array.isArray(store.sessions)) {
+        throw new Error(`Unsupported SIT session store format: ${this.filePath}`);
+      }
+      for (const session of store.sessions) {
+        if (isExpired(session)) continue;
+        this.sessions.set(session.id, session);
+        this.index.set(`${session.channel}:${session.userKey}`, session.id);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
+
+  private persist(): Promise<void> {
+    const snapshot: PersistedSessionStore = {
+      version: 1,
+      sessions: [...this.sessions.values()],
+    };
+    this.writeQueue = this.writeQueue.then(async () => {
+      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+      const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
+      await fs.writeFile(temporaryPath, JSON.stringify(snapshot), "utf8");
+      await fs.rename(temporaryPath, this.filePath);
+    });
+    return this.writeQueue;
+  }
+
+  async create(input: { userKey: string; channel: ConversationChannel }): Promise<ConversationSession> {
+    await this.ensureLoaded();
+    const session: ConversationSession = {
+      id: createId(),
+      userKey: input.userKey,
+      channel: input.channel,
+      state: createInitialConversationState(),
+      stateVersion: 1,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      expiresAt: expiresAt(this.ttlMs),
+    };
+    this.sessions.set(session.id, session);
+    this.index.set(`${input.channel}:${input.userKey}`, session.id);
+    await this.persist();
+    return session;
+  }
+
+  async load(sessionId: string): Promise<ConversationSession | undefined> {
+    await this.ensureLoaded();
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    if (isExpired(session)) {
+      this.sessions.delete(session.id);
+      this.index.delete(`${session.channel}:${session.userKey}`);
+      await this.persist();
+      return undefined;
+    }
+    return session;
+  }
+
+  async loadOrCreate(input: { userKey: string; channel: ConversationChannel }): Promise<ConversationSession> {
+    await this.ensureLoaded();
+    const existingId = this.index.get(`${input.channel}:${input.userKey}`);
+    if (existingId) {
+      const existing = await this.load(existingId);
+      if (existing) return existing;
+    }
+    return this.create(input);
+  }
+
+  async update(sessionId: string, state: ConversationState): Promise<ConversationSession> {
+    const existing = await this.load(sessionId);
+    if (!existing) throw new Error(`Session not found: ${sessionId}`);
+    const updated: ConversationSession = {
+      ...existing,
+      state: {
+        ...state,
+        context: {
+          ...state.context,
+          lastActiveAt: Date.now(),
+        },
+      },
+      stateVersion: existing.stateVersion + 1,
+      updatedAt: nowIso(),
+    };
+    this.sessions.set(sessionId, updated);
+    await this.persist();
+    return updated;
+  }
+
+  async reset(sessionId: string): Promise<ConversationSession> {
+    const existing = await this.load(sessionId);
+    if (!existing) throw new Error(`Session not found: ${sessionId}`);
+    const reset: ConversationSession = {
+      ...existing,
+      state: createInitialConversationState(),
+      stateVersion: existing.stateVersion + 1,
+      updatedAt: nowIso(),
+    };
+    this.sessions.set(sessionId, reset);
+    await this.persist();
+    return reset;
+  }
+
+  async expire(sessionId: string): Promise<void> {
+    await this.ensureLoaded();
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.sessions.set(sessionId, {
+      ...session,
+      expiresAt: new Date(Date.now() - 1).toISOString(),
+    });
+    await this.persist();
+  }
+}
+
+function configuredTtlMs(env: NodeJS.ProcessEnv = process.env): number {
+  const days = Number(env.SIT_SESSION_TTL_DAYS ?? "3");
+  return Number.isFinite(days) && days > 0
+    ? days * 24 * 60 * 60 * 1000
+    : DEFAULT_SESSION_TTL_MS;
+}
+
+const sessionStorePath = process.env.SIT_SESSION_STORE_PATH
+  ? path.resolve(process.env.SIT_SESSION_STORE_PATH)
+  : path.resolve(process.cwd(), ".data", "conversation-sessions.json");
+
+export const sessionRepository: SessionRepository = process.env.SIT_SESSION_PERSISTENCE === "memory"
+  ? new InMemorySessionRepository(configuredTtlMs())
+  : new FileSessionRepository(sessionStorePath, configuredTtlMs());

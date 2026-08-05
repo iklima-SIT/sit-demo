@@ -7,7 +7,11 @@ import XLSX from "xlsx";
 import { createInitialConversationState, normalizeKnowledgeRows, runConversationTurn, type ConversationServices } from "@workspace/sit-engine";
 import { importKnowledgeWorkbook } from "./services/knowledge-importer";
 import { InMemoryKnowledgeRepository, type KnowledgeRepository } from "./repositories/knowledge-repository";
-import { InMemorySessionRepository } from "./repositories/session-repository";
+import {
+  DEFAULT_SESSION_TTL_MS,
+  FileSessionRepository,
+  InMemorySessionRepository,
+} from "./repositories/session-repository";
 import { createApiConversationServices } from "./services/conversation-services";
 import { buildDeveloperConsolePayload, createDeveloperConsoleRecorder } from "./services/developer-console";
 
@@ -166,6 +170,57 @@ test("persistent follow-up memory survives separate requests", async () => {
 
   assert.equal(second.decision?.requiredService, "events");
   assert.equal(second.updatedState.memory.lastEvent?.scope, "tomorrow");
+});
+
+test("sessions retain activity for three days by default", async () => {
+  const beforeCreate = Date.now();
+  const sessions = new InMemorySessionRepository();
+  const session = await sessions.create({ userKey: "three-day-user", channel: "web" });
+  const retentionMs = new Date(session.expiresAt).getTime() - beforeCreate;
+
+  assert.ok(retentionMs <= DEFAULT_SESSION_TTL_MS + 1_000);
+  assert.ok(retentionMs >= DEFAULT_SESSION_TTL_MS);
+});
+
+test("three-day retention is a fixed trip window and does not renew per message", async () => {
+  const sessions = new InMemorySessionRepository();
+  const session = await sessions.create({ userKey: "fixed-trip-window", channel: "web" });
+  const updated = await sessions.update(session.id, {
+    ...session.state,
+    memory: { ...session.state.memory, lastArea: "Sri Thanu" },
+  });
+
+  assert.equal(updated.expiresAt, session.expiresAt);
+});
+
+test("file session repository survives a server repository restart", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sit-sessions-test-"));
+  const filePath = path.join(directory, "sessions.json");
+  const firstRepository = new FileSessionRepository(filePath);
+  const created = await firstRepository.create({ userKey: "returning-traveler", channel: "web" });
+  await firstRepository.update(created.id, {
+    ...created.state,
+    context: {
+      ...created.state.context,
+      firstName: "Maya",
+      duration: "3 days",
+    },
+    memory: {
+      ...created.state.memory,
+      lastArea: "Sri Thanu",
+    },
+  });
+
+  const restartedRepository = new FileSessionRepository(filePath);
+  const restored = await restartedRepository.loadOrCreate({
+    userKey: "returning-traveler",
+    channel: "web",
+  });
+
+  assert.equal(restored.id, created.id);
+  assert.equal(restored.state.context.firstName, "Maya");
+  assert.equal(restored.state.context.duration, "3 days");
+  assert.equal(restored.state.memory.lastArea, "Sri Thanu");
 });
 
 test("session reset returns a fresh conversation state", async () => {

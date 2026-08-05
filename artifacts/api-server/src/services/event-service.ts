@@ -356,6 +356,20 @@ function eventOverlapsWindow(event: CalendarEvent, window: NormalizedEventTimeWi
   return eventStart <= windowEnd && eventEnd >= windowStart;
 }
 
+function eventStartsWithinWindow(event: CalendarEvent, window: NormalizedEventTimeWindow): boolean {
+  const eventStart = new Date(event.startTime).getTime();
+  const windowStart = new Date(window.startTime).getTime();
+  const windowEnd = new Date(window.endTime).getTime();
+  return eventStart >= windowStart && eventStart <= windowEnd;
+}
+
+function requiresStartInsideWindow(input: EventSearchRequest): boolean {
+  const cutoff = new Date(input.clock.filteringCutoff).getTime();
+  const windowStart = new Date(input.timeWindow.startTime).getTime();
+  return (input.timeWindow.granularity === "day" || input.timeWindow.granularity === "specific_date")
+    && cutoff <= windowStart;
+}
+
 function cleanCalendarValue(value: string): string {
   return value
     .replace(/\s*›.*$/g, "")
@@ -603,7 +617,9 @@ function evaluateEventCandidate(event: MergedEvent, input: EventSearchRequest): 
     humanNeeds: classification.humanNeeds,
   };
 
-  if (!eventOverlapsWindow(event, input.timeWindow)) {
+  const startsInsideRequiredWindow = !requiresStartInsideWindow(input)
+    || eventStartsWithinWindow(event, input.timeWindow);
+  if (!eventOverlapsWindow(event, input.timeWindow) || !startsInsideRequiredWindow) {
     return {
       event: `${event.title} at ${event.venue}`,
       startTime: event.startTime,
@@ -611,7 +627,9 @@ function evaluateEventCandidate(event: MergedEvent, input: EventSearchRequest): 
       ...classificationFields,
       matchRole: "none",
       included: false,
-      reason: `Excluded because it falls outside the normalized ${input.timeWindow.label} window.`,
+      reason: !startsInsideRequiredWindow
+        ? `Excluded because it started before the normalized ${input.timeWindow.label} window.`
+        : `Excluded because it falls outside the normalized ${input.timeWindow.label} window.`,
     };
   }
 

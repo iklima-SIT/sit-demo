@@ -22,11 +22,51 @@ export interface ConversationApiTurnOutput extends RunConversationTurnOutput {
 }
 
 export interface DeveloperServiceCall {
-  service: "EventService" | "KnowledgeService" | "LocationService" | "PlanService" | "WeatherService" | "RecommendationService";
+  service: "EventService" | "DestinationContextService" | "KnowledgeService" | "LocationService" | "PlanService" | "WeatherService" | "RecommendationService";
   called: boolean;
   durationMs: number;
   status: "success" | "fallback" | "skipped" | "error";
   error?: string;
+}
+
+export interface ShadowAgentTrace {
+  status: "disabled" | "success" | "error";
+  disabledReason?: "shadow_flag_off" | "developer_trace_required" | "missing_api_key";
+  model?: string;
+  durationMs: number;
+  plan?: {
+    mode: "information" | "decision";
+    relationshipToActiveTask: "new_task" | "continuation" | "refinement" | "contract_answer" | "correction";
+    activeObjective: string;
+    action: string;
+    requiredServices: string[];
+    knownConstraints: Array<{
+      name: string;
+      value: string;
+      source: "current_message" | "active_task" | "conversation" | "memory";
+    }>;
+    missingCriticalContext: string[];
+    questionRequired: boolean;
+    conversationContract?: {
+      expectedAnswer: "venue" | "date" | "area" | "event" | "preference";
+      reason: string;
+    };
+    preservedContext: string[];
+    confidence: number;
+    decisionSummary: string;
+    proposedResponse: string;
+    comparison: {
+      agreesWithCanonical: boolean;
+      differences: string[];
+    };
+  };
+  rawModelOutput?: string;
+  error?: string;
+  promptInspector?: {
+    systemPrompt: string;
+    inputContext: string;
+    finalPrompt: string;
+  };
 }
 
 export interface DeveloperConsolePayload {
@@ -99,9 +139,18 @@ export interface DeveloperConsolePayload {
     finalPrompt: string;
   };
   llmResponse: {
+    status: "disabled" | "success" | "error" | "not_called";
+    tier?: "none" | "standard" | "premium";
+    model?: string;
+    routingReason?: string;
+    reasoningEffort?: string;
+    estimatedInputTokens?: number;
+    maxOutputTokens?: number;
+    durationMs?: number;
     rawModelOutput: string;
     finalFormattedOutput: string;
   };
+  shadowAgent?: ShadowAgentTrace;
   decisionTrace: string[];
   timelineTurn: {
     stateBefore: ConversationState;
